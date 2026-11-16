@@ -1,0 +1,563 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:'AmiriQ';src:url(amiri.woff2) format('woff2');}
+@font-face{font-family:'Corm';src:url(corm.woff2) format('woff2');}
+@font-face{font-family:'CormI';src:url(cormi.woff2) format('woff2');}
+@font-face{font-family:'Clock';src:url(clock.woff2) format('woff2');}
+html,body{margin:0;background:#000;overflow:hidden}
+canvas{display:block}
+</style></head>
+<body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// 3:07 AM (Qaf 50:16). The app's own character lies awake at 3 am, his heart racing. Two blows (a buzz, then a pounding),
+// weaker and weaker tries to calm down, then he turns the phone over and bows down. The same heartbeat that kept him
+// awake turns to warm light, beat by beat, until the room is golden and he sleeps. One continuous take, loops to night.
+// ============ helpers ============
+const W=1080,H=1920;
+const cv=document.getElementById('c'); let ctx=cv.getContext('2d');
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const inv=(a,b,x)=>clamp((x-a)/(b-a));
+const ss=(a,b,x)=>{const t=inv(a,b,x);return t*t*(3-2*t);};
+const sm=t=>t*t*t*(t*(t*6-15)+10);
+const D=Math.PI/180;
+const hex=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+const mixh=(a,b,t)=>{const x=hex(a),y=hex(b);return '#'+x.map((v,i)=>Math.round(v+(y[i]-v)*t).toString(16).padStart(2,'0')).join('');};
+const rgba=(c,a=1)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${clamp(a)})`;
+function rng(seed){let s=seed>>>0;return()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296;};}
+// keyframes [[t,v],...] eased with smootherstep between keys; v may be number or array
+function K(keys,t,ease=sm){
+  if(t<=keys[0][0]) return keys[0][1];
+  for(let i=1;i<keys.length;i++){ if(t<=keys[i][0]){ const [a,va]=keys[i-1],[b,vb]=keys[i]; const u=ease((t-a)/(b-a));
+    return Array.isArray(va)? va.map((x,j)=>lerp(x,vb[j],u)) : lerp(va,vb,u);} }
+  return keys[keys.length-1][1];
+}
+const P2=s=>new Path2D(s);
+const circ=(x,y,r)=>`M${x-r} ${y}a${r} ${r} 0 1 0 ${2*r} 0a${r} ${r} 0 1 0 ${-2*r} 0z`;
+// The app's two-tone shape: shade underneath, base shifted up-left and clipped to the shape.
+function S(d,base,shade,dx=-6,dy=-5){ const p=typeof d==='string'?P2(d):d; ctx.fillStyle=shade; ctx.fill(p); ctx.save(); ctx.clip(p); ctx.translate(dx,dy); ctx.fillStyle=base; ctx.fill(p); ctx.restore(); }
+function strokeP(d,col,w,alpha=1){ ctx.save(); ctx.globalAlpha*=alpha; ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.stroke(typeof d==='string'?P2(d):d); ctx.restore(); }
+
+// ============ the character (the app's default man: skin 2, short dark hair, trimmed beard; plain grey tee) ============
+const SK=['#e0a676','#bf7c4f'], HC=['#2a1c14','#140c07'], TEE=['#8f9aab','#626c7d'], DARK='#26160f';
+const SOFT=mixh(SK[0],SK[1],.62), LIP=mixh(SK[1],'#4a2216',.45);
+const U=2.3;                 // world px per character unit
+const L=86;                  // hip to neck, units
+// ============ timeline (seconds) ============
+const T={END:40.3,
+  buzz1:1.12, hit1:1.45, buzz2:4.85, hit2:5.1, up2:[5.1,5.75],
+  push:[9.2,10.8], down1:[11.0,12.1], cover:[12.2,12.6], uncover:[13.0,13.35], reach:[13.4,13.9], tap:14.05, look:[13.9,14.5],
+  up3:[14.7,15.9], hold:[15.9,17.3], flip:[17.3,17.95], bow:[18.0,19.0], hush:[19.0,20.0],
+  ANS:20.0, rise:[22.6,25.0], exhale:25.0, smile:[24.6,26.2], down2:[26.6,29.2], still:[32.0,38.8], seam:[38.8,40.3]};
+
+// heart rate (beats per minute) through the story, and the beat times from it
+function bpm(t){
+  if(t<T.hit1) return 0;
+  return K([[T.hit1,96],[4.6,92],[T.hit2,122],[8.6,116],[12,104],[16.5,98],[18.6,96],[T.ANS,84],[24,72],[29,58],[34,54],[38.8,54]],t,x=>x);
+}
+const BEATS=(()=>{ const b=[]; let t=T.hit1, h2=0; while(t<T.seam[0]+.2){
+    // the hush: one beat held back before the answer
+    if(t>T.hush[0]+.05 && t<T.ANS-.02){ t=T.ANS; continue; }
+    if(!h2 && t>T.hit2-.32){ h2=1; b.push(T.hit2, T.hit2+.2); t=T.hit2+.2+60/bpm(T.hit2+.3); continue; }
+    b.push(t); t+=60/bpm(t+.01); }
+  // hit 2 is a double thump: make sure a beat lands exactly on it
+  return b; })();
+function beatK(t,decay=6){ let v=0; for(const b of BEATS){ if(b>t) break; const u=t-b; if(u<1.2) v=Math.max(v, Math.exp(-u*decay)*(1-Math.exp(-u*60))); } return v; }
+function beatsBefore(t){ let n=0; for(const b of BEATS) if(b<=t) n++; return n; }
+
+// ============ pose ============
+// r: torso rotation (deg): -90 lying on his back (head to the left, face to us), 0 sitting up, +60 bowed over his knees.
+const HIP=[566,1004];
+function pose(t){
+  const p={};
+  p.r=K([[0,-90],[T.hit2,-90],[T.up2[1],0],[T.down1[0],0],[T.down1[1],-90],[T.up3[0],-90],[T.up3[1],-4],[T.hold[1],-2],[T.bow[0],-1],[T.bow[1],0],[T.rise[0],0],[T.rise[1],0],[T.down2[0],0],[T.down2[1],-90]],t);
+  // a sudden jolt up (blow 2) is fast, with a little overshoot
+  if(t>T.up2[0]&&t<T.up2[1]+.6){ const u=(t-T.up2[0]); p.r+= Math.sin(clamp(u/.6)*Math.PI)*0 + 6*Math.exp(-((u-.75)**2)/.03); }
+  p.bow=0;
+  // breathing: depth and rate
+  const depth=K([[0,.010],[T.hit1,.016],[T.hit2,.034],[8.6,.03],[T.down1[1],.024],[T.hold[0],.02],[T.bow[1],.014],[T.ANS,.012],[T.exhale-.6,.03],[T.exhale+1.5,.012],[30,.008],[T.seam[1],.010]],t);
+  const rate=K([[0,.22],[T.hit1,.36],[T.hit2,.85],[8.6,.7],[12,.5],[T.hold[1],.4],[T.ANS,.32],[26,.2],[30,.16],[T.seam[1],.22]],t);
+  p.breath=depth*Math.sin(phaseOf(t));
+  // the big exhale at peace: a long out-breath
+  p.breath+= -.03*Math.exp(-((t-T.exhale-.4)**2)/.5) + .025*Math.exp(-((t-T.exhale+.7)**2)/.25);
+  p.beat=beatK(t);
+  // blanket: how far up the torso it covers (units)
+  p.cover=K([[0,40],[T.hit2,40],[T.up2[1],16],[T.down1[0],16],[T.down1[1],40],[T.up3[0],40],[T.up3[1],16],[T.down2[0],16],[T.down2[1]+.4,40]],t);
+  // hands (torso-local units, or {w:[x,y]} world). A = near hand (screen bottom when lying), B = far hand.
+  const chest=[4,-50], chestB=[-2,-48];
+  const restA=[-46,-14], restB=[16,-34];
+  const lapA=[-10,-2], lapB=[12,-4];
+  const lo=[-2,-40];
+  p.A=KH([[0,lo],[T.hit1,lo],[T.hit1+.35,chest],[T.hit2,chest],[T.up2[1],[2,-54]],[T.push[0],[-8,-52]],[T.push[0]+.45,[-24,-50]],[T.push[0]+.95,[-15,-52]],[T.push[1]-.2,[-26,-46]],[T.down1[0],[-30,-34]],[T.down1[1],chest],[T.cover[0],chest],[T.cover[1],[-12,-122]],[T.uncover[0],[-12,-122]],[T.uncover[1],chest],[T.up3[0],chest],[T.up3[1],lapA],[T.bow[0],lapA],[T.bow[1],[-46,-98]],[T.rise[0],[-46,-98]],[T.rise[1]-.3,chest],[T.down2[1],chest],[T.seam[0],chest],[T.seam[1],lo]],t);
+  p.B=KH([[0,restB],[T.hit1+.1,restB],[T.hit1+.6,[22,-40]],[T.hit2,[22,-40]],[T.up2[1],[44,-6]],[T.push[0],[10,-52]],[T.push[0]+.45,[25,-50]],[T.push[0]+.95,[16,-52]],[T.push[1]-.2,[30,-30]],[T.down1[0],[40,-12]],[T.down1[1],restB],[T.cover[0],restB],[T.cover[1],[12,-124]],[T.uncover[0],[12,-124]],[T.uncover[1],restB],
+    [T.reach[0],restB],[T.reach[1],{w:[PHONE0[0]-4,PHONE0[1]+30]}],[T.look[1],[30,-70]],[T.up3[0],[34,-66]],[T.up3[1],lapB],[T.flip[0],lapB],[T.flip[0]+.35,{w:[PHONEDOWN[0]-4,PHONEDOWN[1]-2]}],[T.flip[1],{w:[PHONEDOWN[0]-4,PHONEDOWN[1]+30]}],[T.bow[0],{w:[PHONEDOWN[0]-4,PHONEDOWN[1]+30]}],[T.bow[1],[46,-98]],[T.rise[0],[46,-98]],[T.rise[1],[40,-12]],[T.down2[1],restB],[T.seam[1],restB]],t);
+  // head: tilt (deg, relative to torso), eyes, brows, mouth
+  p.tilt=K([[0,-6],[T.hit1,-6],[T.hit1+.3,-2],[T.hit2,-4],[T.up2[1],4],[7.4,-3],[8.6,2],[T.down1[1],-4],[T.look[0],-4],[T.look[1],12],[T.up3[0],8],[T.up3[1],14],[T.hold[1],18],[T.bow[1],4],[T.rise[0],4],[T.rise[1],-6],[T.exhale+1,-2],[T.down2[1],-8],[T.seam[1],-6]],t);
+  let lid=K([[0,.42],[T.hit1-.02,.2],[T.hit1+.08,1.18],[T.hit1+.9,1.05],[4.4,.5],[T.buzz2,.5],[T.hit2+.06,1.28],[7,1.15],[T.down1[1],1.18],[T.cover[1],1.1],[T.uncover[1],.85],[T.look[1],.8],[T.up3[1],.62],[T.hold[1],.5],[T.flip[1],.55],[T.bow[1]-.3,0],[T.seam[0],0],[T.seam[1],.42]],t);
+  // blinks (the panicked ones are quick)
+  for(const [b,d] of [[3.1,.16],[7.3,.12],[9.0,.14],[10.9,.18],[14.3,.2],[16.6,.3]]) lid*= 1-Math.exp(-((t-b)**2)/(d*d*.12));
+  p.lid=lid;
+  p.worry=K([[0,.35],[T.hit1,.35],[T.hit1+.2,.9],[T.hit2,.8],[T.hit2+.2,1],[T.hold[1],.9],[T.bow[1],.7],[T.ANS,.6],[T.rise[1],.15],[T.smile[1],0],[T.seam[0],0],[T.seam[1],.35]],t);
+  p.open=K([[0,0],[T.hit2,0],[T.hit2+.2,1],[8.6,.6],[T.down1[1],.3],[T.up3[0],.2],[T.hold[0],0],[T.exhale-.3,0],[T.exhale+.2,.55],[T.exhale+1.6,0]],t);
+  p.smile=K([[0,0],[T.smile[0],0],[T.smile[1],1],[T.seam[0],1],[T.seam[1],0]],t);
+  p.look=K([[0,[3.2,-.6]],[T.hit1,[3.2,-.6]],[T.hit1+.12,[0,0]],[T.hit2,[0,0]],[T.up2[1],[-2,0]],[6.8,[2.6,0]],[7.6,[-2.6,.4]],[8.6,[0,2.4]],[T.push[1],[0,2.6]],[T.down1[1],[0,-.6]],[T.look[0],[0,-.6]],[T.look[1],[2.2,1.4]],[T.up3[1],[1.4,2.4]],[T.hold[1],[1,2.6]],[T.seam[0],[0,0]],[T.seam[1],[3.2,-.6]]],t);
+  return p;
+}
+function phaseOf(t){ // integrate breathing rate so the phase never jumps
+  let ph=0, s=0; const n=Math.ceil(t/.05); const dt=t/Math.max(1,n);
+  for(let i=0;i<n;i++){ const x=i*dt; const r=K([[0,.22],[T.hit1,.36],[T.hit2,.85],[8.6,.7],[12,.5],[T.hold[1],.4],[T.ANS,.32],[26,.2],[30,.16],[T.seam[1],.22]],x); ph+=2*Math.PI*r*dt; }
+  return ph;
+}
+// hand keys may mix torso-local and world targets: convert both ends to world at time t, then blend
+let CUR=null;
+function KH(keys,t){
+  let i=1; if(t<=keys[0][0]) return toW(keys[0][1]); while(i<keys.length && t>keys[i][0]) i++;
+  if(i>=keys.length) return toW(keys[keys.length-1][1]);
+  const [a,va]=keys[i-1],[b,vb]=keys[i]; const u=sm((t-a)/(b-a)); const A=toW(va), B=toW(vb); return [lerp(A[0],B[0],u),lerp(A[1],B[1],u)];
+}
+function toW(v){ if(v.w) return v.w; if(!CUR) return [0,0]; return CUR.L2W(v[0],v[1]); }
+const PHONE0=[396,934], PHONEDOWN=[742,1012];
+
+// ============ the frame ============
+let ROOM=null;
+function setup(){
+  // the room's still layer at the world scale (drawn under the camera)
+}
+function frame(t){
+  const p0={r:0}; // placeholder
+  // camera (world point at screen 540,905; zoom)
+  const cam=K([[0,[318,950,1.56]],[T.hit2,[318,950,1.56]],[T.up2[1]+.1,[470,850,1.22]],[8.4,[560,888,1.0]],[T.hold[1],[566,900,1.08]],[T.bow[1],[566,900,1.42]],[T.ANS,[566,900,1.42]],[26.4,[560,872,.96]],[T.down2[0]+.6,[540,890,1.0]],[31.6,[318,950,1.56]],[T.seam[1],[318,950,1.56]]],t);
+  // the camera feels his body: a hard drop and spring back on each blow
+  const drop=(at,amp)=>{const u=t-at; return u<0?0:amp*Math.exp(-u*3.2)*Math.sin(u*9.5+.2)*(u<.05?u/.05:1);};
+  let cy=cam[1]-drop(T.hit1,9)-drop(T.hit2,16);
+  // very subtle handheld drift in the struggle, steady after the answer
+  const hh=(1-ss(T.ANS,T.ANS+3,t))*ss(0,.01,t);
+  const dx=hh*(Math.sin(t*.53)*3+Math.sin(t*1.31)*1.4), dy=hh*(Math.sin(t*.41+1)*2.5+Math.sin(t*1.07)*1.2);
+  return {cx:cam[0]+dx, cy:cy+dy, z:cam[2]};
+}
+
+// ============ light ============
+function warmK(t){ return t<T.ANS?0: 1-Math.exp(-(t-T.ANS)/4.2); }   // keeps rising, no pause
+function nightAmt(t){ return 1-ss(T.seam[0],T.seam[1],t)*0; }
+function phoneLight(t){
+  let a=K([[0,.62],[T.buzz1,.62],[T.buzz1+.08,1],[T.buzz1+1.4,.75],[T.buzz2,.7],[T.buzz2+.08,1],[T.buzz2+1.6,.72],[T.tap,.72],[T.tap+.1,1],[17.58,.95],[17.7,0],[T.seam[0],0],[T.seam[1],.62]],t);
+  return a;
+}
+
+// ============ drawing the room (world coordinates) ============
+const STARS=(()=>{const r=rng(7),a=[];for(let i=0;i<26;i++)a.push([r(),r(),r()]);return a;})();
+function drawRoom(t,warm){
+  // wall
+  const g=ctx.createLinearGradient(0,300,0,1300); g.addColorStop(0,mixh('#6b7fb0','#e9cfae',warm)); g.addColorStop(1,mixh('#8c9ac0','#f6e2c6',warm));
+  ctx.fillStyle=g; ctx.fillRect(-800,-400,2800,1800);
+  // a soft wainscot line
+  ctx.fillStyle='rgba(40,50,90,.10)'; ctx.fillRect(-800,980,2800,40);
+  // window (upper right): night sky, a few stars
+  const wx=660,wy=520,ww=250,wh=300;
+  ctx.fillStyle='#e9e2d4'; roundRect(wx-16,wy-16,ww+32,wh+32,10); ctx.fill();
+  ctx.fillStyle='#c9bfae'; ctx.fillRect(wx-16,wy+wh+6,ww+32,14);
+  const sky=ctx.createLinearGradient(0,wy,0,wy+wh); sky.addColorStop(0,'#16224a'); sky.addColorStop(1,'#2b3d74');
+  ctx.fillStyle=sky; ctx.fillRect(wx,wy,ww,wh);
+  for(const [a,b,c] of STARS){ const tw=.5+.5*Math.sin(t*(1+c*2)+c*20); ctx.fillStyle=`rgba(255,250,235,${.35+.5*tw*c})`; ctx.beginPath(); ctx.arc(wx+8+a*(ww-16),wy+8+b*(wh*.7),1.2+c*1.3,0,7); ctx.fill(); }
+  // a thin crescent
+  ctx.fillStyle='#fff6dc'; ctx.beginPath(); ctx.arc(wx+ww*.72,wy+wh*.26,22,0,7); ctx.fill();
+  ctx.fillStyle='#17244c'; ctx.beginPath(); ctx.arc(wx+ww*.72+9,wy+wh*.26-6,20,0,7); ctx.fill();
+  ctx.fillStyle='#e9e2d4'; ctx.fillRect(wx+ww/2-5,wy,10,wh); ctx.fillRect(wx,wy+wh/2-5,ww,10);
+  // curtain on the left of the window
+  S(`M${wx-40} ${wy-36}Q${wx+10} ${wy+120} ${wx-6} ${wy+wh+40}L${wx-62} ${wy+wh+40}Q${wx-70} ${wy+150} ${wx-60} ${wy-36}Z`,'#b8a7c9','#8d7aa3',-5,-3);
+  // floor
+  ctx.fillStyle=mixh('#5b5272','#8a6a5a',warm); ctx.fillRect(-800,1190,2800,900);
+  ctx.fillStyle='rgba(0,0,0,.12)'; ctx.fillRect(-800,1190,2800,10);
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function drawBedBack(){
+  // headboard
+  S('M92 730Q92 700 122 700L150 700Q172 700 172 730L172 1150L92 1150Z','#9c6a48','#7a4e33',-6,-4);
+  // mattress top (seen a little from above) and its front face
+  S('M150 900Q150 884 168 884L962 884Q990 884 990 906L990 1110L150 1110Z','#efe9df','#d6cdbf',-4,-6);
+  S('M150 1104L990 1104L990 1176Q990 1192 972 1192L168 1192Q150 1192 150 1176Z','#d9cfc0','#bfb3a2',-3,-3);
+  // bed frame rail
+  S('M136 1168L1004 1168L1004 1214Q1004 1226 990 1226L150 1226Q136 1226 136 1214Z','#9c6a48','#7a4e33',-4,-3);
+  ctx.fillStyle='rgba(30,20,40,.25)'; ctx.fillRect(150,1226,840,10);
+  // pillow
+  S('M168 930Q160 900 196 898L360 902Q392 904 390 940L384 1062Q380 1094 350 1094L200 1096Q166 1096 166 1064Z','#fbf8f1','#ddd5c7',-5,-6);
+  strokeP('M206 912Q280 924 360 912','#d6cdbf',3,.7);
+}
+function blanketLegs(p){
+  // from the hips to the feet, a soft lump with the feet at the end
+  const x0=HIP[0]-6;
+  const d=`M${x0} 920Q${x0+120} 900 ${x0+260} 924Q${x0+330} 900 ${x0+372} 930Q${x0+408} 960 ${x0+400} 1040L${x0+404} 1112Q${x0+200} 1124 ${x0} 1116Z`;
+  S(d,'#5d7fbe','#3f5f9c',-6,-6);
+  strokeP(`M${x0+40} 1000Q${x0+180} 1010 ${x0+330} 994`,'#3f5f9c',3,.5);
+  strokeP(`M${x0+60} 1060Q${x0+200} 1068 ${x0+360} 1054`,'#3f5f9c',3,.4);
+  // the fold-over at the top edge (sheet showing)
+}
+function blanketCover(p,lying){
+  // the part over his body, in torso-local units, so it follows the torso as he lies back and sits up
+  const c=p.cover;
+  ctx.save(); ctx.translate(HIP[0],HIP[1]); ctx.rotate(p.r*D*lying); ctx.scale(U,U);
+  const ly=inv(-10,-80,p.r), top=-c, w=lerp(58,38,ly), wl=lerp(46,49,ly);
+  const d=`M${-wl} 22L${-wl} ${top+6}Q${-wl} ${top-2} ${-wl+10} ${top}Q0 ${top+5} ${w-10} ${top}Q${w} ${top-2} ${w} ${top+6}L${w} 22Z`;
+  S(d,'#5d7fbe','#3f5f9c',-3,-2);
+  // the turned-down sheet along the top edge
+  S(`M${-wl} ${top+6}Q${-wl} ${top-2} ${-wl+10} ${top}Q0 ${top+5} ${w-10} ${top}Q${w} ${top-2} ${w} ${top+6}L${w} ${top+13}Q0 ${top+17} ${-wl} ${top+13}Z`,'#f3eee5','#d8cfc1',-2,-2);
+  ctx.restore();
+}
+
+// ============ the character's parts ============
+function torsoPath(){ return P2(`M-44 6Q-49 -40 -40 ${-L+18}Q-36 ${-L+2} -18 ${-L}Q0 ${-L+6} 18 ${-L}Q36 ${-L+2} 40 ${-L+18}Q49 -40 44 6Q0 14 -44 6Z`); }
+function drawTorso(p){
+  const br=(1+p.breath)*(1-.46*p.bow);
+  ctx.save(); ctx.scale(1+p.breath*.4+.04*p.bow,br);
+  S(torsoPath(),TEE[0],TEE[1],-5,-4);
+  // collar and a soft fold
+  strokeP(`M-17 ${-L+1}Q0 ${-L+13} 17 ${-L+1}`,mixh(TEE[1],'#000000',.15),3.2,.8);
+  strokeP(`M-30 -20Q-26 -4 -30 4`,TEE[1],2.2,.5);
+  ctx.restore();
+}
+function drawNeckAndHead(p,ex){
+  // head local: the app's 200-unit head, neck base at (100,142) -> attach at the torso's neck
+  ctx.save(); ctx.translate(0,-L*(1+p.breath)*(1-.46*p.bow)+3+p.bow*30); ctx.rotate(p.tilt*D); ctx.scale(1,1-.1*p.bow); ctx.translate(-100,-140);
+  const fy=96;
+  S(`M88 ${fy+26}H112V${fy+46}Q100 ${fy+51} 88 ${fy+46}Z`,mixh(SK[0],SK[1],.45),SK[1],-3,4);
+  // ears
+  S(circ(57,fy+8,8.5),SK[0],SOFT,-2,-2); S(circ(143,fy+8,8.5),SK[0],SOFT,-2,-2);
+  strokeP(`M56 ${fy+5}q2.6 3.6 0 7M144 ${fy+5}q-2.6 3.6 0 7`,SK[1],2);
+  const fr=44,hx=100;
+  const face=`M${hx-fr} ${fy}C${hx-fr} ${fy-fr*.58} ${hx-fr*.56} ${fy-fr} ${hx} ${fy-fr}C${hx+fr*.56} ${fy-fr} ${hx+fr} ${fy-fr*.58} ${hx+fr} ${fy}C${hx+fr*1.02} ${fy+fr*.62} ${hx+fr*.6} ${fy+fr*.98} ${hx} ${fy+fr*.98}C${hx-fr*.6} ${fy+fr*.98} ${hx-fr*1.02} ${fy+fr*.62} ${hx-fr} ${fy}Z`;
+  S(face,SK[0],SOFT,-5,-5);
+  // trimmed beard as in the app icon
+  const bd='M62 104Q64 140 100 144Q136 140 138 104Q130 122 116 122Q100 116 84 122Q70 122 62 104Z';
+  S(bd,HC[0],HC[1],-4,-4);
+  ctx.save(); ctx.clip(P2(bd)); for(const [i,x] of [74,86,100,114,126].entries()){ strokeP(`M${x} ${126+(i%2)*3}Q${x+(x<100?-2:2)} ${(126+140)/2} ${x+(x-100)*.12} ${140-6-Math.abs(x-100)*.2}`,HC[1],1.8,.55);} ctx.restore();
+  strokeP(`M70 120Q74 128 88 136`,'#ffffff',2.4,.16);
+  const ey=fy+8;
+  // nose
+  strokeP(`M101 ${ey-1}Q103 ${ey+5} 104.6 ${ey+8}`,SK[1],2,.45);
+  strokeP(`M97 ${ey+10.2}Q100 ${ey+11.8} 103.6 ${ey+9.6}`,SK[1],2.2);
+  drawEyes(p,ey,ex);
+  drawBrows(p,ey);
+  // moustache, then mouth
+  ctx.fillStyle=HC[1]; ctx.fill(P2(`M86 ${ey+14}Q100 ${ey+8} 114 ${ey+14}Q108 ${ey+17} 100 ${ey+14}Q92 ${ey+17} 86 ${ey+14}Z`));
+  drawMouth(p,ey+18);
+  drawHair(fy);
+  if(p.bow>0.01){ // head bowed towards us: the crown comes round, the face goes under
+    const k=p.bow; ctx.save(); ctx.globalAlpha=ss(.5,.85,k); S(`M52 ${fy+4}C52 ${fy-50} 148 ${fy-50} 148 ${fy+4}Q124 ${fy-6+k*22} 100 ${fy-4+k*24}Q76 ${fy-6+k*22} 52 ${fy+4}Z`,HC[0],HC[1],-4,-4); ctx.restore(); }
+  ctx.restore();
+}
+function drawEyes(p,ey,ex){
+  const lid=p.lid;
+  for(const x of [82,118]){
+    const R=6.2*1.1*1.18, Y=7.8*1.1*1.08;
+    if(lid<.06){
+      // closed: a soft downward lash line (calm), tighter when worried
+      const k=p.worry; strokeP(`M${x-7} ${ey+.5}Q${x} ${ey+6-2.5*k} ${x+7} ${ey+.5}`,DARK,3.2); continue;
+    }
+    const sc=P2(`M${x-R} ${ey}a${R} ${Y} 0 1 0 ${2*R} 0a${R} ${Y} 0 1 0 ${-2*R} 0z`);
+    ctx.save(); ctx.clip(sc);
+    ctx.fillStyle='#fff'; ctx.fill(sc);
+    ctx.fillStyle='rgba(207,198,216,.55)'; ctx.beginPath(); ctx.ellipse(x,ey-Y*.78,R*1.1,Y*.55,0,0,7); ctx.fill();
+    const o=x<100?1:-1;
+    const px=x+o*R*.16*0+p.look[0]*1.2, py=ey+Y*.14+p.look[1]*1.2, pr=Math.min(R,Y)*.7*(1-.12*clamp(lid-1,0,.3)/.3);
+    ctx.fillStyle='#6b3a1f'; ctx.beginPath(); ctx.arc(px,py,pr,0,7); ctx.fill();
+    ctx.fillStyle='rgba(142,79,40,.7)'; ctx.beginPath(); ctx.arc(px,py+pr*.28,pr*.78,0,7); ctx.fill();
+    ctx.fillStyle='#160c07'; ctx.beginPath(); ctx.arc(px,py,pr*.56*(1-.15*clamp(lid-1,0,.3)/.3),0,7); ctx.fill();
+    // catch light: the phone's cold light, later the warm light
+    ctx.fillStyle=`rgba(255,255,255,${.9})`; ctx.beginPath(); ctx.arc(px+pr*.3,py-pr*.34,pr*.22,0,7); ctx.fill();
+    if(ex.tear>0){ ctx.fillStyle=`rgba(200,230,255,${.5*ex.tear})`; ctx.beginPath(); ctx.ellipse(x,ey+Y*.7,R*.9,Y*.25,0,0,7); ctx.fill(); }
+    // the upper lid comes down with `lid` (1 = as drawn in the app, >1 = wide open, 0 = shut)
+    const lidY=lerp(ey+Y*1.05, ey-Y*.52, clamp(lid,0,1)) - (lid>1? (lid-1)*Y*1.4:0);
+    ctx.fillStyle=SK[0]; ctx.beginPath(); ctx.moveTo(x-R-2,ey-Y-6); ctx.lineTo(x+R+2,ey-Y-6); ctx.lineTo(x+R+2,lidY+1); ctx.quadraticCurveTo(x,lidY-Y*.42*clamp(lid,.2,1),x-R-2,lidY+1); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // lid line
+    strokeP(`M${x-R+.4} ${lidY+.8}Q${x} ${lidY-Y*.42*clamp(lid,.2,1)} ${x+R-.2} ${lidY+.6}`,DARK,2.4);
+    if(lid>1.02) strokeP(`M${x-R+1} ${ey+Y*.8}Q${x} ${ey+Y*1.05} ${x+R-1} ${ey+Y*.8}`,SK[1],1.4,.6*clamp((lid-1)/.2));
+  }
+}
+function drawBrows(p,ey){
+  const w=p.worry, lift=-1.5*w+(p.lid>1?-(p.lid-1)*8:0)+(p.lid<.3?1.5:0);
+  const by=ey-14+lift;
+  for(const [i,x] of [82,118].entries()){
+    const o=i?1:-1; const tilt=-3.2*w*o; // inner ends up: worry
+    strokeP(`M${x-6*o} ${by+tilt}Q${x} ${by-2.6-tilt*.3} ${x+6*o} ${by-tilt*.2+w*1.2}`,HC[1],3,.95);
+  }
+}
+function drawMouth(p,my){
+  const s=p.smile, o=p.open;
+  if(o>.05){
+    ctx.fillStyle='#5e1f16'; ctx.beginPath(); ctx.ellipse(100,my+3,3.2+1.4*o,1.2+4*o,0,0,7); ctx.fill();
+    strokeP(`M95 ${my+3-4*o}Q100 ${my+1-4.5*o} 105 ${my+3-4*o}`,LIP,1.4,.6);
+    return;
+  }
+  // from a flat, pressed line (worry) to the app's soft smile
+  const w=lerp(5.5,9,s), d=lerp(-.6,6.5,s)-p.worry*.8;
+  strokeP(`M${100-w} ${my+1}Q100 ${my+1+d} ${100+w} ${my+1}`,LIP,3);
+}
+function drawHair(fy){
+  const R=47;
+  const cap=`M${100-R} ${fy-2}C${100-R} ${fy-R*.6} ${100-R*.56} ${fy-R} 100 ${fy-R}C${100+R*.56} ${fy-R} ${100+R} ${fy-R*.6} ${100+R} ${fy-2}Q${100+R-5} ${fy-24} 126 ${fy-30}Q100 ${fy-26} 74 ${fy-30}Q${100-R+5} ${fy-24} ${100-R} ${fy-2}Z`;
+  S(cap,HC[0],HC[1],-4,-4);
+  S('M56 92Q50 46 100 46Q150 46 144 92Q140 74 128 68Q118 76 104 70Q90 76 78 68Q62 72 56 92Z',HC[0],HC[1],-4,-4);
+  strokeP('M70 60Q86 52 100 52',HC[1],2,.4); strokeP('M106 54Q124 55 134 66',HC[1],2,.4); strokeP('M84 66Q90 60 98 58',HC[1],1.6,.4);
+  ctx.fillStyle=mixh(HC[0],'#ffffff',.22); ctx.globalAlpha=.7; ctx.fill(P2('M68 68Q78 54 100 51Q118 50 128 56Q110 55 96 58Q80 62 68 68Z')); ctx.globalAlpha=1;
+}
+// an arm from the shoulder (torso-local) to a hand target (world), two segments with a fixed bend side (no flips)
+function drawArm(p,side,handW,front){
+  const sh=CUR.L2W(side*37,-L+16);
+  const h=[handW[0],handW[1]];
+  const a=30*U,b=30*U; let dx=h[0]-sh[0],dy=h[1]-sh[1]; let d=Math.hypot(dx,dy);
+  if(d>a+b-1){ const k=(a+b-1)/d; h[0]=sh[0]+dx*k; h[1]=sh[1]+dy*k; dx=h[0]-sh[0]; dy=h[1]-sh[1]; d=a+b-1; }
+  d=Math.max(d,8);
+  const ang=Math.atan2(dy,dx), cosA=clamp((a*a+d*d-b*b)/(2*a*d),-1,1);
+  // bend outwards from the body: elbows point away from the torso's centre line
+  const bend=side*CUR.bendSign;
+  const el=[sh[0]+a*Math.cos(ang+bend*Math.acos(cosA)), sh[1]+a*Math.sin(ang+bend*Math.acos(cosA))];
+  ctx.save(); ctx.scale(1/U,1/U); // draw in world px but with unit-ish widths
+  ctx.restore();
+  limb(sh,el,20*U,19*U); limb(el,h,19*U,17*U);
+  // mitten hand
+  const o=Math.atan2(h[1]-el[1],h[0]-el[0]);
+  ctx.save(); ctx.translate(h[0],h[1]); ctx.rotate(o-Math.PI/2); ctx.scale(U,U);
+  S(`M-8.6 1.5a8.6 10 0 1 0 17.2 0a8.6 10 0 1 0 -17.2 0z`,SK[0],SK[1],-2.5,-2.5);
+  S(`M${side*-5.4-3.6} -1a3.6 5 0 1 0 7.2 0a3.6 5 0 1 0 -7.2 0z`,SK[0],SK[1],-1.5,-1.5);
+  ctx.restore();
+  return h;
+}
+function limb(A,B,wa,wb){
+  const dx=B[0]-A[0],dy=B[1]-A[1],Ln=Math.hypot(dx,dy)||1,nx=-dy/Ln,ny=dx/Ln; const a=wa*.5,b=wb*.5;
+  const d=new Path2D(); d.moveTo(A[0]+nx*a,A[1]+ny*a); d.lineTo(B[0]+nx*b,B[1]+ny*b); d.arc(B[0],B[1],b,Math.atan2(ny,nx),Math.atan2(ny,nx)+Math.PI,dx*ny-dy*nx>0);
+  d.lineTo(A[0]-nx*a,A[1]-ny*a); d.arc(A[0],A[1],a,Math.atan2(-ny,-nx),Math.atan2(-ny,-nx)+Math.PI,dx*ny-dy*nx>0); d.closePath();
+  S(d,mixh(TEE[0],'#ffffff',.04),TEE[1],-3*U*.4,-2.5*U*.4);
+}
+
+// ============ the knot of worries on his chest ============
+const LOOPS=(()=>{const r=rng(503),a=[];for(let i=0;i<22;i++){const n=5+(r()*3|0),pts=[];for(let k=0;k<n;k++){const an=k/n*Math.PI*2+r()*.6;pts.push([an,.45+r()*.6]);}a.push({pts,rot:r()*7,sp:(r()-.5)*.5,ex:.8+r()*.5,w:2.6+r()*2.4,up:.5+r()});}return a;})();
+function knotSize(t){
+  let s=K([[0,.62],[T.hit1-.04,.62],[T.hit1+.16,.84],[T.hit2-.04,.86],[T.hit2+.16,1.2],[9,1.14],[T.push[0]+.45,1.0],[T.push[0]+.95,1.2],[T.push[1]-.2,1.02],[T.push[1]+.3,1.2],[T.ANS,1.22]],t);
+  return s*(1+.07*beatK(t,7)*(t<T.ANS?1:.4));
+}
+const unravelK=t=>ss(T.ANS+1.0,T.ANS+6.5,t)*(1-ss(T.seam[0],T.seam[1],t));
+const goldK=t=>ss(T.ANS-.05,T.ANS+2.2,t)*(1-ss(T.seam[0],T.seam[1],t));
+function knotAt(){ return CUR.L2W(1,-46); }
+function drawKnot(t,p,gold){
+  const g=goldK(t), u=unravelK(t);
+  // at the loop seam the knot comes back: it fades in again on his chest as the night returns
+  const back=ss(T.seam[0]+.2,T.seam[1],t);
+  const c=knotAt(); const S0=74*knotSize(t)*(1+(t>T.ANS?u*1.6:0));
+  const squeeze=t>T.push[0]&&t<T.push[1]? 1-.18*Math.sin(Math.PI*inv(T.push[0],T.push[0]+.95,t)) : 1;
+  ctx.save(); ctx.translate(c[0],c[1]);
+  if(!gold){
+    const a=Math.max(1-g,back);
+    if(a<=0.01){ ctx.restore(); return; }
+    // a soft dark shadow it casts
+    const sh=ctx.createRadialGradient(0,0,0,0,0,S0*1.25); sh.addColorStop(0,`rgba(10,12,28,${.55*a})`); sh.addColorStop(1,'rgba(10,12,28,0)');
+    ctx.fillStyle=sh; ctx.beginPath(); ctx.arc(0,0,S0*1.25,0,7); ctx.fill();
+    ctx.scale(squeeze,1/squeeze*.98);
+    for(const L of LOOPS){ const ang=L.rot+t*L.sp*(t<T.ANS?1:.3)+Math.sin(t*1.7+L.rot)*.05; ctx.save(); ctx.rotate(ang);
+      ctx.beginPath(); const P=L.pts.map(([an,rr])=>[Math.cos(an)*rr*S0*L.ex,Math.sin(an)*rr*S0]);
+      ctx.moveTo((P[0][0]+P[1][0])/2,(P[0][1]+P[1][1])/2);
+      for(let k=1;k<=P.length;k++){ const q=P[k%P.length], n=P[(k+1)%P.length]; ctx.quadraticCurveTo(q[0],q[1],(q[0]+n[0])/2,(q[1]+n[1])/2); }
+      ctx.lineCap='round'; ctx.strokeStyle=`rgba(120,134,190,${.35*a})`; ctx.lineWidth=L.w*1.6+3; ctx.stroke();
+      ctx.strokeStyle=`rgba(10,11,22,${.95*a})`; ctx.lineWidth=L.w*1.6; ctx.stroke(); ctx.restore(); }
+  } else {
+    if(g<=0.01){ ctx.restore(); return; }
+    // the same threads, lit from inside: they glow gold, loosen, rise and become light
+    ctx.globalCompositeOperation='lighter';
+    for(const [i,L] of LOOPS.entries()){ const lift=u*u*L.up*260, fade=g*(1-u)**1.4;
+      if(fade<=0.005) continue;
+      const ang=L.rot+t*L.sp*.3; ctx.save(); ctx.translate(Math.sin(i*2.1+t*.4)*u*40,-lift); ctx.rotate(ang);
+      ctx.beginPath(); const P=L.pts.map(([an,rr])=>[Math.cos(an)*rr*S0*L.ex,Math.sin(an)*rr*S0]);
+      ctx.moveTo((P[0][0]+P[1][0])/2,(P[0][1]+P[1][1])/2);
+      for(let k=1;k<=P.length;k++){ const q=P[k%P.length], n=P[(k+1)%P.length]; ctx.quadraticCurveTo(q[0],q[1],(q[0]+n[0])/2,(q[1]+n[1])/2); }
+      ctx.shadowColor=`rgba(255,190,90,${fade})`; ctx.shadowBlur=18;
+      ctx.strokeStyle=`rgba(255,214,140,${.85*fade})`; ctx.lineWidth=L.w*(1.4-u*.8); ctx.lineCap='round'; ctx.stroke(); ctx.restore(); }
+  }
+  ctx.restore();
+}
+// the hands go over the knot (pushing it, holding his chest): redraw the near arm, graded like the night around it
+const OFF=document.createElement('canvas'); OFF.width=W; OFF.height=H; const octx=OFF.getContext('2d');
+const MSK=document.createElement('canvas'); MSK.width=W; MSK.height=H; const mctx=MSK.getContext('2d');
+function drawArmsOver(t,p,pp){
+  const g=goldK(t); if(g>=.999) return;
+  // draw the arms on their own layer, grade them like the night, then lay them over the knot
+  const M=ctx.getTransform(); const main=ctx;
+  octx.setTransform(1,0,0,1,0,0); octx.globalCompositeOperation='source-over'; octx.clearRect(0,0,W,H); octx.setTransform(M);
+  ctx=octx; drawArm(p,-1,pp.A,true); if(p.r>-45) drawArm(p,1,pp.B,false);
+  const warm=warmK(t); const night=[52,66,118], day=[250,192,128]; const m=night.map((v,i)=>lerp(v,day[i],warm));
+  mctx.setTransform(1,0,0,1,0,0); mctx.globalCompositeOperation='copy'; mctx.drawImage(OFF,0,0);
+  octx.setTransform(1,0,0,1,0,0); octx.globalCompositeOperation='multiply'; octx.fillStyle=rgba(m); octx.fillRect(0,0,W,H);
+  octx.globalCompositeOperation='destination-in'; octx.drawImage(MSK,0,0);
+  ctx=main; ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1-g; ctx.drawImage(OFF,0,0); ctx.restore();
+}
+// icons that fly from the phone into the knot on each buzz: a notification, a bill, a cracked heart
+function drawIcon(kind,x,y,sc,a){
+  ctx.save(); ctx.translate(x,y); ctx.scale(sc,sc); ctx.globalAlpha=a;
+  if(kind===0){ ctx.fillStyle='#ff4757'; ctx.beginPath(); ctx.arc(0,0,22,0,7); ctx.fill(); ctx.fillStyle='#fff'; roundRect(-3.5,-13,7,16,3.5); ctx.fill(); ctx.beginPath(); ctx.arc(0,9,3.8,0,7); ctx.fill(); }
+  if(kind===1){ ctx.rotate(-.12); ctx.fillStyle='#f4f1ea'; roundRect(-18,-24,36,48,4); ctx.fill(); ctx.fillStyle='#ff4757'; ctx.fillRect(-18,-24,36,9); ctx.fillStyle='#9aa0ad'; for(let k=0;k<4;k++) ctx.fillRect(-12,-8+k*7,k===3?14:24,3); ctx.fillStyle='#ff4757'; ctx.fillRect(2,13,10,4); }
+  if(kind===2){ ctx.fillStyle='#ff5a6e'; ctx.beginPath(); ctx.moveTo(0,20); ctx.bezierCurveTo(-30,0,-22,-24,0,-10); ctx.bezierCurveTo(22,-24,30,0,0,20); ctx.fill();
+    ctx.strokeStyle='#3a1520'; ctx.lineWidth=3; ctx.lineJoin='round'; ctx.beginPath(); ctx.moveTo(1,-10); ctx.lineTo(-4,-2); ctx.lineTo(4,4); ctx.lineTo(-2,12); ctx.stroke(); }
+  ctx.restore();
+}
+function drawIcons(t,ph,p){
+  const c=knotAt();
+  for(const [k,at] of [[0,T.buzz1+.02],[1,T.buzz2+.02],[2,T.buzz2+.16]]){
+    const u=t-at; if(u<0||u>1.3) continue;
+    const fl=ss(0,.36,u);                       // flight from the phone to the knot
+    const pop=ss(0,.12,u)*(1-ss(.62,1.1,u));    // appear, then sink into the knot
+    const x=lerp(PHONE0[0],c[0]+(k-1)*14,fl), y=lerp(PHONE0[1]-40,c[1],fl)-Math.sin(Math.PI*fl)*60;
+    const sc=(.9+.25*Math.sin(Math.PI*ss(0,.2,u)))*(1-.55*ss(.4,1.1,u))*1.15;
+    drawIcon(k,x,y,sc,pop);
+  }
+}
+
+// ============ the phone ============
+function drawPhone(t,pos,rot,faceUp,glow,screenOnly,sx=1){
+  ctx.save(); ctx.translate(pos[0],pos[1]); ctx.rotate(rot); ctx.scale(Math.max(sx,.02),1);
+  const w=62,h=112;
+  if(!screenOnly){ ctx.fillStyle='#1b1d24'; roundRect(-w/2,-h/2,w,h,12); ctx.fill(); }
+  if(faceUp>0){
+    ctx.globalAlpha=faceUp;
+    const g=ctx.createLinearGradient(0,-h/2,0,h/2); g.addColorStop(0,`rgba(${150+90*glow},${175+70*glow},255,1)`); g.addColorStop(1,`rgba(${90+80*glow},${110+80*glow},${210+40*glow},1)`);
+    ctx.fillStyle=g; roundRect(-w/2+4,-h/2+4,w-8,h-8,9); ctx.fill();
+    const tx=(t<T.tap||t>T.seam[0])?'3:07':'3:09';
+    ctx.fillStyle=`rgba(255,255,255,${.92})`; ctx.font='300 25px Clock'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(tx,0,-22);
+    // a notification card that slides in on the buzz
+    const nb=Math.max(bellN(T.buzz1,t),bellN(T.buzz2,t));
+    if(nb>0){ ctx.globalAlpha=faceUp*nb; ctx.fillStyle='rgba(255,255,255,.85)'; roundRect(-w/2+8,4,w-16,16,5); ctx.fill(); ctx.fillStyle='rgba(60,70,110,.5)'; ctx.fillRect(-w/2+13,9,18,2.5); ctx.fillRect(-w/2+13,13.5,30,2.5); }
+    ctx.globalAlpha=1;
+  } else { ctx.fillStyle='#2a2d36'; roundRect(-w/2+3,-h/2+3,w-6,h-6,10); ctx.fill(); ctx.fillStyle='#3a3e4a'; ctx.beginPath(); ctx.arc(-w/2+14,-h/2+14,5,0,7); ctx.fill(); }
+  ctx.restore();
+}
+function bellN(at,t){ const u=t-at; return u<0?0: ss(0,.15,u)*(1-ss(2.6,3.4,u)); }
+
+// ============ draw one frame ============
+let READY=false;
+window.draw=function(t){
+  t=((t%T.END)+T.END)%T.END;
+  CUR=null; const p=pose(t);
+  const lying=1;
+  CUR={ r:p.r, L2W:(x,y)=>{ const c=Math.cos(p.r*D),s=Math.sin(p.r*D); const X=x*U, Y=y*U*(1+p.breath)*(1-.46*(p.bow||0)); return [HIP[0]+X*c-Y*s, HIP[1]+X*s+Y*c]; }, bendSign:-1 };
+  const A=p.A? null:null;
+  const pp=pose(t); // recompute hand targets with CUR set
+  const cam=frame(t);
+  const warm=warmK(t);
+  ctx.setTransform(1,0,0,1,0,0); ctx.globalCompositeOperation='source-over'; ctx.filter='none';
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(540,905); ctx.scale(cam.z,cam.z); ctx.translate(-cam.cx,-cam.cy);
+  drawRoom(t,warm);
+  drawBedBack();
+  blanketLegs(p);
+  // phone (on the pillow, in his hand, or face down on the blanket)
+  const ph=phoneState(t,pp);
+  // torso, head
+  ctx.save(); ctx.translate(HIP[0],HIP[1]); ctx.rotate(p.r*D); ctx.scale(U,U);
+  // pulse of the heart on the chest (tiny)
+  drawTorso(p);
+  drawNeckAndHead(p,{tear:0});
+  ctx.restore();
+  drawArm(p,1,pp.B,false);   // the far arm goes under the blanket's edge
+  blanketCover(p,1);
+  if(ph.under){ if(ph.seam>0){ ctx.save(); ctx.globalAlpha=1-ph.seam; drawPhone(t,ph.pos,ph.rot,0,0); ctx.globalAlpha=ph.seam; drawPhone(t,PHONE0,-.14,1,ph.glow); ctx.restore(); } else drawPhone(t,ph.pos,ph.rot,ph.face,ph.glow); }
+  drawArm(p,-1,pp.A,true);
+  if(!ph.under) drawPhone(t,ph.pos,ph.rot,ph.face,ph.glow,false,ph.sx??1);
+  // ---- light ----
+  const chestW=CUR.L2W(0,-50);
+  window.LAST={A:pp.A,B:pp.B,neck:CUR.L2W(0,-L),hip:HIP,phone:ph.pos,r:p.r,cam:[cam.cx,cam.cy,cam.z],lid:p.lid,bow:p.bow};
+  lightPass(t,cam,ph,chestW,warm,p);
+  drawKnot(t,p,false); drawArmsOver(t,p,pp); drawKnot(t,p,true); drawIcons(t,ph,p);
+  if(ph.face>0.01||ph.seam>0){ ctx.save(); ctx.globalAlpha=.85*(ph.seam>0?ph.seam:1); drawPhone(t,ph.seam>0?PHONE0:ph.pos,ph.seam>0?-.14:ph.rot,1,ph.glow,true,ph.sx??1); ctx.restore(); }
+  ctx.restore();
+  // grade, vignette, text in screen space
+  screenPass(t,warm);
+};
+function phoneState(t,pp){
+  const gl=phoneLight(t);
+  if(t<T.reach[1]-.05) { const jig=Math.max(bellN(T.buzz1,t),bellN(T.buzz2,t))>0? Math.sin(t*90)*2*(Math.max(1-(t-T.buzz1)/.5,0)+Math.max(1-Math.abs(t-T.buzz2-.25)/.5,0)):0;
+    return {pos:[PHONE0[0]+jig,PHONE0[1]],rot:-.14,face:1,glow:gl,under:true,light:gl}; }
+  if(t<T.flip[1]){ const h=pp.B; const u=ss(T.flip[0]+.15,T.flip[1]-.05,t);
+    return {pos:[h[0]+4,h[1]-30],rot:lerp(-.14,.08,ss(T.reach[1],T.look[1],t))+u*.04,face:u<.5?1:0,sx:Math.abs(1-2*u),glow:gl,under:false,light:gl}; }
+  // face down on the blanket; it fades in again at the loop seam on the pillow (the object only, never the character)
+  const s=ss(T.seam[0],T.seam[1],t);
+  return {pos:PHONEDOWN,rot:.12,face:0,glow:gl,under:true,light:gl,seam:s};
+}
+// light in world space: phone glow (cold) and the heart's light (warm)
+const MOTES=(()=>{const r=rng(31),a=[];for(let i=0;i<70;i++)a.push([r(),r(),r(),r()]);return a;})();
+function lightPass(t,cam,ph,chest,warm,p){
+  // night: multiply the whole world down to deep blue (lifted by the warm light later)
+  ctx.save();
+  ctx.globalCompositeOperation='multiply';
+  const night=[52,66,118];
+  const day=[250,192,128];
+  const m=night.map((v,i)=>lerp(v,day[i],warm));
+  ctx.fillStyle=rgba(m); ctx.fillRect(-800,-400,2800,2600);
+  ctx.globalCompositeOperation='screen';
+  // the phone's cold glow on his face
+  const L=ph.light; const lp=ph.seam>0?PHONE0:ph.pos;
+  if(L>0.01){ const g=ctx.createRadialGradient(lp[0],lp[1],10,lp[0],lp[1],380);
+    g.addColorStop(0,`rgba(150,185,255,${.55*L})`); g.addColorStop(.35,`rgba(90,120,210,${.28*L})`); g.addColorStop(1,'rgba(0,0,40,0)');
+    ctx.fillStyle=g; ctx.fillRect(lp[0]-400,lp[1]-400,800,800); }
+  // moonlight from the window, faint
+  const mg=ctx.createRadialGradient(780,700,40,780,700,520); mg.addColorStop(0,'rgba(90,110,170,.22)'); mg.addColorStop(1,'rgba(0,0,0,0)'); ctx.fillStyle=mg; ctx.fillRect(200,100,1200,1300);
+  // the heart's light: each beat a warm pulse; the glow grows and never pauses
+  if(t>=T.ANS-.05){
+    const bk=beatK(t,3.2);
+    const R=lerp(140,820,warm)*(1+.06*bk);
+    const g=ctx.createRadialGradient(chest[0],chest[1],0,chest[0],chest[1],R);
+    const a=clamp(.25+.75*warm)*(.8+.35*bk);
+    g.addColorStop(0,`rgba(255,226,170,${.9*a})`); g.addColorStop(.18,`rgba(255,180,100,${.55*a})`); g.addColorStop(.5,`rgba(220,120,50,${.2*a})`); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.fillRect(chest[0]-R,chest[1]-R,2*R,2*R);
+    // rings: one per beat, soft and expanding
+    for(const b of BEATS){ if(b<T.ANS-.01||b>t) continue; const u=t-b; if(u>2.6) continue;
+      const rr=40+u*420, aa=(1-u/2.6)**2*.35*(1-warm*.4);
+      ctx.strokeStyle=`rgba(255,214,150,${aa})`; ctx.lineWidth=18*(1-u/2.6)+2; ctx.filter='blur(6px)'; ctx.beginPath(); ctx.arc(chest[0],chest[1],rr,0,7); ctx.stroke(); ctx.filter='none'; }
+    // dust in the light
+    for(const [a1,b1,c1,d1] of MOTES){ const ang=a1*7+t*.05*(c1-.5), rad=60+b1*520*warm; const x=chest[0]+Math.cos(ang)*rad+Math.sin(t*.3+d1*9)*14, y=chest[1]+Math.sin(ang)*rad*.8-((t*12*c1+d1*300)%300)+150;
+      const al=warm*.55*(.4+.6*Math.sin(t*(.6+c1)+d1*20)**2)*(1-rad/700); if(al<=0) continue; ctx.fillStyle=`rgba(255,232,180,${al})`; ctx.beginPath(); ctx.arc(x,y,1.2+c1*2.2,0,7); ctx.fill(); }
+  }
+  ctx.restore();
+}
+function screenPass(t,warm){
+  ctx.setTransform(1,0,0,1,0,0);
+  // vignette, heavier in the struggle
+  const v=ctx.createRadialGradient(540,860,300,540,900,1250); v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,`rgba(30,10,4,${lerp(.78,.5,warm)})`);
+  ctx.fillStyle=v; ctx.fillRect(0,0,W,H);
+  // the bottom (caption area) falls to dark
+  const b=ctx.createLinearGradient(0,1250,0,1920); b.addColorStop(0,'rgba(5,6,16,0)'); b.addColorStop(1,'rgba(5,6,16,.75)'); ctx.fillStyle=b; ctx.fillRect(0,1250,W,670);
+  const tb=ctx.createLinearGradient(0,200,0,640); tb.addColorStop(0,`rgba(20,12,10,${.55*warm})`); tb.addColorStop(1,'rgba(20,12,10,0)'); ctx.fillStyle=tb; ctx.fillRect(0,0,W,640);
+  drawAyah(t,warm);
+}
+// ============ the ayah (top band), written over 0.5-3.4 s and held ============
+const AR='أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ';
+const EN='Verily, in the remembrance of Allah do hearts find rest.';
+function drawAyah(t,warm){
+  const fade=1-ss(T.seam[0]+.2,T.seam[1]-.1,t);   // at the seam it fades, and writes in again from frame 0
+  const wIn=ss(.35,3.0,t);
+  const breathe=.92+.08*Math.sin(t*1.3);
+  const a=fade*wIn;
+  if(a<=0) return;
+  ctx.save();
+  // Arabic: revealed right to left
+  ctx.font='76px AmiriQ'; ctx.direction='rtl'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  const tw=ctx.measureText(AR).width;
+  ctx.save(); const rv=clamp(ss(.35,2.6,t)*1.15); ctx.beginPath(); ctx.rect(505+tw/2+30-(tw+60)*rv,250,(tw+60)*rv+4,180); ctx.clip();
+  const col=warm>0?[lerp(236,255,warm),lerp(240,232,warm),lerp(255,200,warm)]:[236,240,255];
+  ctx.shadowColor=`rgba(${warm>0.01?'255,200,130':'150,180,255'},${.55*a})`; ctx.shadowBlur=26;
+  ctx.fillStyle=rgba(col,a*breathe); ctx.fillText(AR,505,338);
+  ctx.restore();
+  // English, one line, word by word
+  ctx.direction='ltr'; ctx.font='500 38px Corm'; ctx.textAlign='left';
+  const words=EN.split(' '); const full=ctx.measureText(EN).width; let x=505-full/2;
+  words.forEach((w,i)=>{ const st=1.4+i*.17; const q=ss(st,st+.7,t)*fade; if(q>0){ ctx.globalAlpha=q; ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowBlur=14; ctx.fillStyle=rgba([246,240,228]); ctx.fillText(w,x,452+(1-q)*10);} x+=ctx.measureText(w+' ').width; });
+  ctx.globalAlpha=a*.7; ctx.font='26px Corm'; ctx.textAlign='center'; ctx.letterSpacing='7px'; ctx.fillStyle='rgba(235,226,210,1)'; ctx.shadowBlur=8; ctx.fillText("AR-RA'D  13:28",505,510);
+  ctx.restore();
+}
+window.SAFE=0;
+window.probe=(a,b,dt)=>{const o=[];for(let t=a;t<b;t+=dt){
+  CUR=null; const p=pose(t); CUR={ r:p.r, L2W:(x,y)=>{ const c=Math.cos(p.r*D),s=Math.sin(p.r*D); const X=x*U, Y=y*U*(1+p.breath)*(1-.46*(p.bow||0)); return [HIP[0]+X*c-Y*s, HIP[1]+X*s+Y*c]; }, bendSign:-1 };
+  const pp=pose(t); const ph=phoneState(t,pp); const cam=frame(t);
+  o.push([t,{A:pp.A,B:pp.B,neck:CUR.L2W(0,-L),phone:ph.pos,cam:[cam.cx,cam.cy,cam.z],lid:p.lid}]);}return o;};
+window.events=()=>({beats:BEATS, T, end:T.END});
+window.ready=document.fonts.load('76px AmiriQ').then(()=>document.fonts.load('500 44px Corm')).then(()=>document.fonts.load('300 25px Clock')).then(()=>document.fonts.load('26px Corm')).then(()=>{READY=true; window.draw(0);});
+</script></body></html>
