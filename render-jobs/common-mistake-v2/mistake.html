@@ -1,0 +1,261 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:'AmiriQ';src:url(amiriq.ttf) format('truetype');}
+@font-face{font-family:'Amiri';src:url(amiri.ttf) format('truetype');}
+@font-face{font-family:'Corm';src:url(corm.woff2) format('woff2');}
+@font-face{font-family:'CormI';src:url(cormi.woff2) format('woff2');}
+html,body{margin:0;background:#000;overflow:hidden}
+canvas{display:block}
+</style></head><body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// "A mistake many make": an'amtu -> an'amta (Al-Fatiha 1:7). One continuous take, deterministic draw(t), loops at END.
+const W=1080,H=1920,TXC=505,END=15;
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x)), lerp=(a,b,k)=>a+(b-a)*k;
+const inv=(a,b,x)=>clamp((x-a)/(b-a)), sm=x=>x*x*(3-2*x), smr=x=>x*x*x*(x*(x*6-15)+10);
+const mixc=(a,b,k)=>a.map((v,i)=>v+(b[i]-v)*k), rgba=(c,a=1)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- timeline ----------
+const TL={hit1:0.6,hit2:1.8,hes:2.55,go:2.95,land:4.65,ripple:4.65,pull0:5.15,pull1:8.0,w1:6.45,w2:6.9,w4:7.35,trans:7.75,ret:13.3,END};
+// warmth: cold teal at the mistake, warm gold after the fix, back to cool for the loop
+const warmK=t=>sm(inv(4.4,8.6,t))*(1-sm(inv(13.5,14.9,t)));
+// camera scale and focus (world -> screen)
+let FS=118, words=[], LINE_Y=0, WORD=null;
+function cam(t){
+  const s0=2.3, sMid=2.5, sClose=3.05, sEnd=1.0;
+  let s, k=0, z=0; // k: 0 = on the word, 1 = whole line; z: leaning in on the mark
+  if(t<TL.pull0){ s=lerp(s0,sMid,sm(inv(0,2.4,t))); z=smr(inv(2.2,4.4,t)); s=lerp(s,sClose,z); }
+  else if(t<TL.ret){ const p=smr(inv(TL.pull0,TL.pull1,t)); k=p; z=1-p; s=lerp(sClose,sEnd,p)*(1-.02*sm(inv(TL.pull1,TL.ret,t))); }
+  else { const p=smr(inv(TL.ret,END,t)); k=1-p; s=lerp(sEnd*.98,s0,p); }
+  const mx=WORD.cx+markF.cx*.55;
+  const fx=lerp(lerp(WORD.cx,mx,z),0,k), fy=lerp(WORD.cy-FS*.32,LINE_Y-FS*.3,k);
+  const sx=TXC, sy=lerp(735,700,k);
+  const br=(1-.7*warmK(t));
+  return {s, fx, fy, sx:sx+Math.sin(t*.5)*2.2*br, sy:sy+Math.sin(t*.37+1)*2.6*br, k};
+}
+function worldT(c){ ctx.setTransform(c.s,0,0,c.s,c.sx-c.fx*c.s,c.sy-c.fy*c.s); }
+
+// ---------- words + marks ----------
+const BARE='أَنْعَمْت', FATHA='َ', DAMMA='ُ';
+const LINE=['صِرَاطَ','الَّذِينَ',null,'عَلَيْهِمْ'];  // right -> left; null = the word we fix
+const MS=3; // mask resolution multiplier
+let markF=null, markD=null, partsF=[], partsD=[];
+function textCanvas(str,fs,font='AmiriQ'){
+  const c=document.createElement('canvas'); const x=c.getContext('2d'); x.font=`${fs}px ${font}`; x.direction='rtl';
+  const w=Math.ceil(x.measureText(str).width)+fs; c.width=w; c.height=Math.ceil(fs*2.2);
+  const y=c.getContext('2d'); y.font=`${fs}px ${font}`; y.direction='rtl'; y.textAlign='center'; y.fillStyle='#fff';
+  y.fillText(str,w/2,fs*1.35); return {c,ax:w/2,ay:fs*1.35};
+}
+function diffMask(withMark){
+  const a=textCanvas(BARE+withMark,FS*MS), b=textCanvas(BARE,FS*MS);
+  const w=Math.max(a.c.width,b.c.width), h=a.c.height;
+  const ca=document.createElement('canvas'); ca.width=w; ca.height=h; const xa=ca.getContext('2d'); xa.drawImage(a.c,(w-a.c.width)/2,0);
+  const cb=document.createElement('canvas'); cb.width=w; cb.height=h; const xb=cb.getContext('2d'); xb.drawImage(b.c,(w-b.c.width)/2,0);
+  const da=xa.getImageData(0,0,w,h), db=xb.getImageData(0,0,w,h);
+  const m=document.createElement('canvas'); m.width=w; m.height=h; const xm=m.getContext('2d'); const out=xm.createImageData(w,h);
+  let x0=w,y0=h,x1=0,y1=0; const pts=[];
+  for(let i=0;i<w*h;i++){ const v=Math.max(0,da.data[i*4+3]-db.data[i*4+3]); if(v>8){ out.data[i*4]=255;out.data[i*4+1]=255;out.data[i*4+2]=255;out.data[i*4+3]=v; const px=i%w, py=(i/w)|0; x0=Math.min(x0,px);x1=Math.max(x1,px);y0=Math.min(y0,py);y1=Math.max(y1,py); if(v>120) pts.push([px,py]); } }
+  xm.putImageData(out,0,0);
+  // mask anchored like the word: world offset = (px - w/2)/MS, (py - ay)/MS
+  return {c:m, w, h, ax:w/2, ay:a.ay, bx:[x0,y0,x1,y1], pts, cx:((x0+x1)/2-w/2)/MS, cy:((y0+y1)/2-a.ay)/MS};
+}
+function tinted(mask,col){ const c=document.createElement('canvas'); c.width=mask.w; c.height=mask.h; const x=c.getContext('2d'); x.drawImage(mask.c,0,0); x.globalCompositeOperation='source-in'; x.fillStyle=col; x.fillRect(0,0,c.width,c.height); return c; }
+let markFgold, markDred, markDgold, markFglow, markDglow;
+
+function layout(){
+  // fit the full line in 820 px at scale 1
+  const m=document.createElement('canvas').getContext('2d'); m.direction='rtl';
+  const ws=()=>{ m.font=`${FS}px AmiriQ`; return LINE.map(w=>m.measureText(w===null?BARE+FATHA:w).width); };
+  let wd=ws(), gap=()=>FS*.34; let tot=wd.reduce((a,b)=>a+b,0)+gap()*3;
+  FS=FS*Math.min(1.0,820/tot); wd=ws(); tot=wd.reduce((a,b)=>a+b,0)+gap()*3;
+  LINE_Y=700+FS*.3; let xr=tot/2; words=[];
+  LINE.forEach((w,i)=>{ const cx=xr-wd[i]/2; words.push({txt:w===null?BARE:w, cx, w:wd[i], target:w===null}); xr-=wd[i]+gap(); });
+  WORD=words.find(w=>w.target); WORD.cy=LINE_Y;
+}
+
+// ---------- particles ----------
+const NP=300; let P=[];
+function buildParticles(){
+  const r=rng(41);
+  const pick=(m)=>{const p=m.pts[(r()*m.pts.length)|0]; return [(p[0]-m.ax)/MS,(p[1]-m.ay)/MS];};
+  const src=[],dst=[]; for(let i=0;i<NP;i++){ src.push(pick(markD)); dst.push(pick(markF)); }
+  // pair by x so the stream reads as one flowing ribbon, with a little shuffle for life
+  src.sort((a,b)=>a[0]-b[0]+(r()-.5)*1.2); dst.sort((a,b)=>a[0]-b[0]+(r()-.5)*1.2);
+  for(let i=0;i<NP;i++){
+    const u=i/NP;
+    P.push({s:src[i], d:dst[i], t0:TL.go+.04+u*.38+r()*.14, dur:1.05+r()*.22, h:5+r()*9, sw:(r()-.5)*26, ph:r()*6.28, sz:.3+r()*.42, tw:r()*6.28});
+  }
+}
+
+// ---------- background ----------
+const motes=[]; {const r=rng(7); for(let i=0;i<120;i++) motes.push({x:r()*W,y:r()*H,s:.8+r()*2.4,v:4+r()*10,p:r()*6.28,d:.3+r()*.7});}
+function drawBg(t){
+  const wk=warmK(t);
+  ctx.setTransform(1,0,0,1,0,0);
+  const top=mixc([5,14,17],[14,20,22],wk), mid=mixc([9,27,31],[30,34,30],wk), bot=mixc([3,9,11],[8,10,10],wk);
+  const g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,rgba(top)); g.addColorStop(.38,rgba(mid)); g.addColorStop(1,rgba(bot)); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // pool of light behind the word: cool and small in the mistake, warm and wide after the fix
+  const c=cam(t); const py=c.sy;
+  const R=lerp(520,820,wk), a=lerp(.20,.40,wk);
+  const lg=ctx.createRadialGradient(TXC,py,0,TXC,py,R); const lc=mixc([60,120,124],[255,210,140],wk);
+  lg.addColorStop(0,rgba(lc,a)); lg.addColorStop(.45,rgba(lc,a*.35)); lg.addColorStop(1,rgba(lc,0)); ctx.fillStyle=lg; ctx.fillRect(0,0,W,H);
+  // a faint eight-point star lattice, barely there (mushaf page feel)
+  ctx.save(); ctx.globalAlpha=.035+.03*wk; ctx.strokeStyle=rgba(mixc([140,200,190],[255,220,160],wk)); ctx.lineWidth=1.2;
+  const sc=lerp(1,.9,c.k); const cx=TXC, cy=py;
+  for(let gy=-6;gy<=6;gy++)for(let gx=-4;gx<=4;gx++){ const x=cx+gx*150*sc+(gy&1?75*sc:0), y=cy+gy*130*sc; const d=Math.hypot(x-cx,y-cy); if(d>780) continue; ctx.globalAlpha=(.035+.03*wk)*(1-d/780); star(x,y,26*sc); }
+  ctx.restore();
+  // motes drifting up through the light
+  ctx.save(); ctx.globalCompositeOperation='lighter';
+  for(const m of motes){ let y=(m.y-t*m.v)%H; if(y<0)y+=H; const x=m.x+Math.sin(t*.3+m.p)*14; const d=Math.hypot(x-TXC,y-py); const near=clamp(1-d/760);
+    const al=(.10+.35*near)*(.5+.5*Math.sin(t*.9+m.p))*lerp(.6,1.15,wk); if(al<.01)continue;
+    const col=mixc([150,210,200],[255,214,150],wk); const rg=ctx.createRadialGradient(x,y,0,x,y,m.s*3); rg.addColorStop(0,rgba(col,al)); rg.addColorStop(1,rgba(col,0)); ctx.fillStyle=rg; ctx.fillRect(x-m.s*3,y-m.s*3,m.s*6,m.s*6); }
+  ctx.restore();
+  // vignette
+  const vg=ctx.createRadialGradient(TXC,py,300,TXC,py,1250); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.55)'); ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+}
+function star(x,y,r){ ctx.beginPath(); for(let i=0;i<16;i++){ const a=i*Math.PI/8, rr=i&1?r*.55:r; ctx.lineTo(x+Math.cos(a)*rr,y+Math.sin(a)*rr);} ctx.closePath(); ctx.stroke(); }
+
+// ---------- the line ----------
+const GOLD=[246,222,164], GOLD_HI=[255,236,190], CORAL=[255,128,108];
+function fillWord(w,alpha,glow,col=GOLD){
+  ctx.font=`${FS}px AmiriQ`; ctx.direction='rtl'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.globalAlpha=alpha; ctx.shadowColor=rgba(mixc(col,[255,200,120],.3),.55*glow); ctx.shadowBlur=18*glow;
+  ctx.fillStyle=rgba(col); ctx.fillText(w.txt,w.cx,LINE_Y); ctx.shadowBlur=0; ctx.globalAlpha=1;
+}
+function revealWord(w,p,alpha,c){
+  if(p<=0||alpha<=0) return;
+  if(p>=1){ fillWord(w,alpha,1); return; }
+  // writes right-to-left behind a soft feathered edge, with a warm glint riding the edge
+  const x0=w.cx+w.w/2+FS*.2, x1=w.cx-w.w/2-FS*.2; const ex=lerp(x0,x1,p), fe=FS*.55;
+  ctx.save(); ctx.beginPath(); ctx.rect(ex,LINE_Y-FS*1.6,x0-ex+FS,FS*2.6); ctx.clip(); fillWord(w,alpha,1); ctx.restore();
+  // feathered part
+  ctx.save(); ctx.beginPath(); ctx.rect(ex-fe,LINE_Y-FS*1.6,fe,FS*2.6); ctx.clip();
+  for(let k=0;k<6;k++){ ctx.save(); ctx.beginPath(); ctx.rect(ex-fe*(k+1)/6,LINE_Y-FS*1.6,fe/6,FS*2.6); ctx.clip(); fillWord(w,alpha*(1-(k+.5)/6)*.9,1); ctx.restore(); }
+  ctx.restore();
+  ctx.save(); ctx.globalCompositeOperation='lighter'; const gg=ctx.createRadialGradient(ex,LINE_Y-FS*.35,0,ex,LINE_Y-FS*.35,FS*.9);
+  gg.addColorStop(0,`rgba(255,226,170,${.35*alpha*Math.sin(Math.PI*p)})`); gg.addColorStop(1,'rgba(255,226,170,0)'); ctx.fillStyle=gg; ctx.fillRect(ex-FS,LINE_Y-FS*1.3,FS*2,FS*2); ctx.restore();
+}
+function drawMask(cnv,m,ox,oy,alpha,scale=1,glowCnv=null,glowA=0){
+  if(alpha<=0.001) return;
+  const cx=WORD.cx+m.cx, cy=LINE_Y+m.cy;
+  ctx.save(); ctx.translate(cx+ox,cy+oy); ctx.scale(scale,scale); ctx.translate(-m.cx,-m.cy);
+  if(glowCnv&&glowA>0){ ctx.globalAlpha=clamp(glowA); ctx.filter='blur(6px)'; ctx.drawImage(glowCnv,-m.ax/MS,-m.ay/MS,m.w/MS,m.h/MS); ctx.filter='none'; }
+  ctx.globalAlpha=alpha; ctx.drawImage(cnv,-m.ax/MS,-m.ay/MS,m.w/MS,m.h/MS); ctx.restore();
+}
+function pulse(t,t0){ const x=t-t0; if(x<0||x>1.6) return 0; return Math.sin(Math.PI*clamp(x/.35))*(x<.35?1:0)+ (x>=.35? Math.exp(-(x-.35)*3.2):0); }
+
+function drawLine(t,c){
+  worldT(c);
+  const wk=warmK(t);
+  const others=sm(inv(TL.w1-.1,TL.w1+.3,t))*(1-sm(inv(13.3,14.1,t)));
+  // the word being fixed (bare, marks drawn separately)
+  const wglow=lerp(.55,1,wk);
+  fillWord(WORD,1,wglow,mixc(GOLD,GOLD_HI,.4*wk));
+  // other words write in as the camera pulls back
+  const wr=(t0)=>sm(inv(t0,t0+.9,t));
+  revealWord(words[0],wr(TL.w1),others,c); revealWord(words[1],wr(TL.w2),others,c); revealWord(words[3],wr(TL.w4),others,c);
+
+  // ---- the marks ----
+  // damma: present at start and returning for the loop
+  const loopBack=sm(inv(13.8,14.9,t));
+  const pre=t<TL.go+.6;
+  if(pre){
+    const pu=pulse(t,TL.hit1)*.7+pulse(t,TL.hit2);
+    const hes=t>TL.hes? Math.sin((t-TL.hes)*21)*.35*sm(inv(TL.hes,TL.hes+.3,t))*(1-sm(inv(TL.go-.1,TL.go,t))) : 0;
+    const lift=-sm(inv(TL.hes,TL.go,t))*2.2;
+    const fade=1-sm(inv(TL.go,TL.go+.42,t));
+    drawMask(markDred,markD,hes,lift,fade,1+.12*pu,markDglow,(.55+.9*pu)*fade);
+  }
+  if(loopBack>0) drawMask(markDred,markD,0,0,loopBack,1,markDglow,.55*loopBack);
+  // fatha: forms as particles land
+  const landed=sm(inv(TL.land-.45,TL.land+.15,t))*(1-loopBack);
+  if(landed>0){ const sp=1+.18*Math.exp(-Math.max(0,t-TL.land)*5)*(t>TL.land?1:0); drawMask(markFgold,markF,0,0,landed,sp,markFglow,landed*(.7+1.2*Math.exp(-Math.max(0,t-TL.land)*1.6))); }
+  // particles
+  if(t>TL.go-.05&&t<TL.land+.6) drawParticles(t);
+  // ripple of light through the word after the fix
+  if(t>TL.ripple&&t<TL.ripple+1.8) drawRipple(t);
+  ctx.setTransform(1,0,0,1,0,0);
+}
+function drawParticles(t){
+  ctx.save(); ctx.globalCompositeOperation='lighter';
+  const ox=WORD.cx, oy=LINE_Y;
+  for(const p of P){
+    const u=(t-p.t0)/p.dur; if(u<-.25||u>1.15) continue;
+    // before departure: a shimmer standing on the damma
+    let x,y,al,col,sz=p.sz;
+    if(u<0){ const k=1+u*4; x=p.s[0]; y=p.s[1]-.6*k; al=clamp(k)*.8; col=CORAL; }
+    else{ const e=smr(clamp(u)); const arc=Math.sin(Math.PI*clamp(u));
+      x=lerp(p.s[0],p.d[0],e)+Math.sin(p.ph+u*5.2)*p.sw*arc; y=lerp(p.s[1],p.d[1],e)-p.h*arc+Math.cos(p.ph+u*4)*3*arc;
+      col=mixc(CORAL,GOLD_HI,sm(clamp(u*1.3))); al=u>1? clamp(1-(u-1)/.15):1; sz=p.sz*(1+.5*arc); }
+    al*=.42*(.7+.3*Math.sin(t*14+p.tw));
+    const r=sz*2.6; const g=ctx.createRadialGradient(ox+x,oy+y,0,ox+x,oy+y,r); g.addColorStop(0,rgba(col,al)); g.addColorStop(.35,rgba(col,al*.45)); g.addColorStop(1,rgba(col,0));
+    ctx.fillStyle=g; ctx.fillRect(ox+x-r,oy+y-r,r*2,r*2);
+  }
+  ctx.restore();
+}
+let wordGlowCnv=null;
+function drawRipple(t){
+  const u=(t-TL.ripple)/1.6; // band sweeps right -> left (reading direction), a ring opens from the fatha
+  const x0=WORD.cx+WORD.w/2+FS*.3, x1=WORD.cx-WORD.w/2-FS*.3; const bx=lerp(x0,x1,smr(clamp(u*1.15)));
+  // a soft band of light (feathered: 14 thin slices with a smooth profile, no hard edges)
+  const env=.42*Math.sin(Math.PI*clamp(u*1.15)), bw=FS*.9, NS=14;
+  for(let i=0;i<NS;i++){ const x=bx-bw/2+i*bw/NS, prof=Math.sin(Math.PI*(i+.5)/NS)**2; ctx.save(); ctx.beginPath(); ctx.rect(x,LINE_Y-FS*1.5,bw/NS+.6,FS*2.4); ctx.clip(); ctx.globalCompositeOperation='lighter';
+    fillWord(WORD,env*prof,0,[255,226,170]); ctx.restore(); }
+  const fx=WORD.cx+markF.cx, fy=LINE_Y+markF.cy; const rr=lerp(4,FS*1.25,smr(clamp(u*1.3))); const ra=.5*(1-clamp(u*1.3));
+  if(ra>0){ ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.strokeStyle=`rgba(255,226,170,${ra})`; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(fx,fy,rr,0,7); ctx.stroke();
+    ctx.strokeStyle=`rgba(255,226,170,${ra*.5})`; ctx.beginPath(); ctx.arc(fx,fy,rr*.66,0,7); ctx.stroke(); ctx.restore(); }
+}
+
+// ---------- screen text ----------
+function txt(s,x,y,font,col,alpha,opts={}){ if(alpha<=.002) return; ctx.save(); ctx.font=font; ctx.direction='ltr'; ctx.textAlign=opts.align||'center'; ctx.textBaseline='middle'; if(opts.ls) ctx.letterSpacing=opts.ls; if(opts.rtl) ctx.direction='rtl';
+  ctx.globalAlpha=alpha; ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=16; if(opts.blur) ctx.filter=`blur(${opts.blur}px)`; ctx.fillStyle=col; ctx.fillText(s,x,y+(opts.dy||0)); ctx.restore(); }
+// a line made of coloured runs, centred
+function runs(parts,x,y,font,alpha,dy=0,blur=0){ if(alpha<=.002) return; ctx.save(); ctx.font=font; ctx.direction='ltr'; ctx.textAlign='left'; ctx.textBaseline='middle'; let tw=0; parts.forEach(p=>tw+=ctx.measureText(p[0]).width);
+  let cx=x-tw/2; ctx.globalAlpha=alpha; ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=16; if(blur) ctx.filter=`blur(${blur}px)`;
+  parts.forEach(p=>{ ctx.fillStyle=p[1]; if(p[2]){ ctx.shadowColor=p[2]; ctx.shadowBlur=22; } else { ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=16; } ctx.fillText(p[0],cx,y+dy); cx+=ctx.measureText(p[0]).width; }); ctx.restore(); }
+function drawText(t,c){
+  const wk=warmK(t), loopIn=sm(inv(13.8,14.9,t));
+  // hook (frame 0)
+  const hook=Math.max(1-sm(inv(TL.pull0,TL.pull0+.9,t)),loopIn);
+  txt('خطأٌ يقع فيه كثيرون في الفاتحة',TXC,330,'48px Amiri','#efe6d2',hook*.95,{rtl:true});
+  txt('A MISTAKE MANY MAKE IN AL-FATIHA',TXC,402,'34px Corm','#cfe3dc',hook*.85,{ls:'5px'});
+  // meaning block: wrong -> right
+  const blockA=Math.max(1-sm(inv(6.0,6.8,t)),loopIn);
+  const sw=sm(inv(TL.land+.05,TL.land+.95,t))*(1-loopIn); const wrong=(1-sw)*blockA, right=sw*blockA;
+  const pu=pulse(t,TL.hit1)*.6+pulse(t,TL.hit2);
+  const YT=1030, YM=1120;
+  runs([["an'amt",'#e9e1cf'],['u',rgba(mixc([255,150,128],[255,190,170],pu*.5)),'rgba(255,110,90,.8)']],TXC,YT,'italic 58px CormI',wrong*.95,0,(1-wrong)*6*(t>TL.land?1:0));
+  runs([['“','#efe6d2'],['I','#ff9a86','rgba(255,110,90,.7)'],[' have blessed”','#efe6d2']],TXC,YM,'78px Corm',wrong,(1-wrong)*8*(t>TL.land?1:0),(1-wrong)*6*(t>TL.land?1:0));
+  runs([["an'amt",'#efe6d2'],['a','#ffe2a0','rgba(255,200,110,.9)']],TXC,YT,'italic 58px CormI',right*.95,(1-right)*-10,(1-right)*6);
+  runs([['“','#f6eee0'],['You','#ffe2a0','rgba(255,200,110,.9)'],[' have blessed”','#f6eee0']],TXC,YM,'78px Corm',right,(1-right)*-12,(1-right)*6);
+  // full ayah translation + reference in the held frame
+  const tr=sm(inv(TL.trans,TL.trans+1.2,t))*(1-sm(inv(13.3,14.0,t)));
+  const lineScreenY=c.sy+(LINE_Y-c.fy)*c.s;
+  txt('AL-FATIHA · 1:7',TXC,lineScreenY-FS*c.s*1.95,'30px Corm','#e8d7b4',tr*.8,{ls:'7px',dy:(1-tr)*8});
+  runs([['“The path of those ','#f6eee0'],['You','#ffe2a0','rgba(255,200,110,.8)'],[' have blessed”','#f6eee0']],TXC,lineScreenY+FS*c.s*.95,'italic 60px CormI',tr,(1-tr)*10,(1-tr)*5);
+  // watermark
+  txt('Ayah Studio',TXC,1300,'30px Corm','#e6dcc6',.55,{ls:'6px'});
+}
+
+// ---------- frame ----------
+window.draw=function(t){
+  t=((t%END)+END)%END;
+  ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over'; ctx.filter='none';
+  const c=cam(t);
+  drawBg(t); drawLine(t,c); drawText(t,c);
+  if(window.SAFE){ ctx.setTransform(1,0,0,1,0,0); ctx.strokeStyle='red'; ctx.lineWidth=2; ctx.strokeRect(0,270,940,980); }
+};
+window.events=()=>[{t:TL.hit1,k:'tick'},{t:TL.hit2,k:'tick2'},{t:TL.hes,k:'hush'},{t:TL.go,k:'lift'},{t:TL.land,k:'chime'},{t:TL.w1,k:'write'},{t:TL.w2,k:'write'},{t:TL.w4,k:'write'},{t:TL.ret,k:'return'},{END}];
+window.ready=(async()=>{
+  await Promise.all(['AmiriQ','Amiri','Corm','CormI'].map(f=>document.fonts.load(`40px ${f}`,f.startsWith('Amir')?'أب':'Ab')));
+  await document.fonts.load('40px AmiriQ','أَنْعَمْتَ'); await document.fonts.ready;
+  layout();
+  markF=diffMask(FATHA); markD=diffMask(DAMMA);
+  markFgold=tinted(markF,'rgb(255,232,176)'); markFglow=tinted(markF,'rgb(255,190,100)');
+  markDred=tinted(markD,'rgb(255,128,108)'); markDglow=tinted(markD,'rgb(255,80,60)');
+  buildParticles();
+  console.log('ready FS',FS.toFixed(1),'F',markF.pts.length,markF.cx.toFixed(1),markF.cy.toFixed(1),'D',markD.pts.length,markD.cx.toFixed(1),markD.cy.toFixed(1));
+  draw(0); return true;
+})();
+</script></body></html>
