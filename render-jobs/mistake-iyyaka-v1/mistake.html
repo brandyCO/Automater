@@ -1,0 +1,303 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:'AmiriQ';src:url(amiriq.ttf) format('truetype');}
+@font-face{font-family:'Amiri';src:url(amiri.ttf) format('truetype');}
+@font-face{font-family:'Corm';src:url(corm.woff2) format('woff2');}
+@font-face{font-family:'CormI';src:url(cormi.woff2) format('woff2');}
+html,body{margin:0;background:#000;overflow:hidden}
+canvas{display:block}
+</style></head><body><canvas id="c" width="1080" height="1920"></canvas>
+<script src="cfg.js"></script>
+<script>
+// "A mistake many make" engine: wrong form -> right form of one word, one continuous take, loops at END.
+// Everything about the reel (words, meanings, palette, motif, transform style) comes from window.CFG (cfg.js).
+const C=window.CFG;
+const W=1080,H=1920,TXC=505,END=C.END||15;
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x)), lerp=(a,b,k)=>a+(b-a)*k;
+const inv=(a,b,x)=>clamp((x-a)/(b-a)), sm=x=>x*x*(3-2*x), smr=x=>x*x*x*(x*(x*6-15)+10);
+const mixc=(a,b,k)=>a.map((v,i)=>v+(b[i]-v)*k), rgba=(c,a=1)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- timeline (15 s) ----------
+const TL={hit1:0.6,hit2:1.8,hes:2.55,go:2.95,land:4.65,ripple:4.65,pull0:5.15,pull1:8.0,w0:6.45,wstep:.45,trans:7.75,ret:13.3,END};
+const warmK=t=>sm(inv(4.4,8.6,t))*(1-sm(inv(13.5,14.9,t)));
+const P_=C.palette;
+let FS=118, words=[], LINE_Y=0, WORD=null, MS=4;
+
+function cam(t){
+  const s0=C.s0||2.3, sMid=s0*1.087, sClose=C.sClose||3.05, sEnd=1.0;
+  let s, k=0, z=0;
+  if(t<TL.pull0){ s=lerp(s0,sMid,sm(inv(0,2.4,t))); z=smr(inv(2.2,4.4,t)); s=lerp(s,sClose,z); }
+  else if(t<TL.ret){ const p=smr(inv(TL.pull0,TL.pull1,t)); k=p; z=1-p; s=lerp(sClose,sEnd,p)*(1-.02*sm(inv(TL.pull1,TL.ret,t))); }
+  else { const p=smr(inv(TL.ret,END,t)); k=1-p; s=lerp(sEnd*.98,s0,p); }
+  const mx=WORD.cx+(M.focusX||0)*.55;
+  const fx=lerp(lerp(WORD.cx,mx,z),0,k), fy=lerp(LINE_Y-FS*.32,LINE_Y-FS*.3,k);
+  const sx=TXC, sy=lerp(735,700,k);
+  const br=(1-.7*warmK(t));
+  return {s, fx, fy, sx:sx+Math.sin(t*.5)*2.2*br, sy:sy+Math.sin(t*.37+1)*2.6*br, k};
+}
+function worldT(c){ ctx.setTransform(c.s,0,0,c.s,c.sx-c.fx*c.s,c.sy-c.fy*c.s); }
+
+// ---------- word masks: shared / out (only in wrong) / in (only in right) ----------
+function render(str,fs,extra){
+  const c=document.createElement('canvas'); const x=c.getContext('2d'); x.font=`${fs}px AmiriQ`; x.direction='rtl';
+  const w=Math.ceil(x.measureText(str).width); return {str,w};
+}
+let M={};
+function buildMasks(){
+  const fs=FS*MS;
+  const m=document.createElement('canvas').getContext('2d'); m.font=`${fs}px AmiriQ`; m.direction='rtl';
+  const wa=m.measureText(C.wrong).width, wb=m.measureText(C.right).width;
+  const pad=fs*.6, w=Math.ceil(Math.max(wa,wb)+pad*2+(C.stopMark?fs*.9:0)), h=Math.ceil(fs*2.4), ay=fs*1.45;
+  const mk=(str,wd,dx)=>{ const c=document.createElement('canvas'); c.width=w; c.height=h; const x=c.getContext('2d'); x.font=`${fs}px AmiriQ`; x.direction='rtl'; x.textAlign='right'; x.fillStyle='#fff';
+    // align: right edge (reading start) unless 'left'
+    let xr = C.align==='left'? pad+wd+dx : w-pad+dx; if(C.align==='center') xr=w/2+wd/2+dx;
+    x.fillText(str,xr,ay); return {c,x,xr}; };
+  // best horizontal offset for the right word so shared pixels overlap most
+  const A=mk(C.wrong,wa,0);
+  if(C.stopMark){ // a soft stop sign after the wrong phrase (to its left)
+    const sx=A.xr-wa-fs*.42, sy=ay-fs*.42; const x=A.x; x.lineWidth=fs*.07; x.strokeStyle='#fff'; x.beginPath(); x.arc(sx,sy,fs*.24,0,7); x.stroke();
+    x.fillRect(sx-fs*.1,sy-fs*.12,fs*.065,fs*.24); x.fillRect(sx+fs*.035,sy-fs*.12,fs*.065,fs*.24); }
+  const da=A.x.getImageData(0,0,w,h).data;
+  let best=0, bestScore=-1;
+  const range=C.searchDx===0?0:Math.round(fs*.25);
+  for(let dx=-range;dx<=range;dx+=Math.max(1,Math.round(fs/60))){ const B=mk(C.right,wb,dx); const db=B.x.getImageData(0,0,w,h).data; let sc=0; for(let i=3;i<da.length;i+=16) sc+=Math.min(da[i],db[i]); if(sc>bestScore){bestScore=sc;best=dx;} }
+  const B=mk(C.right,wb,best); const db=B.x.getImageData(0,0,w,h).data;
+  const mkC=()=>{const c=document.createElement('canvas'); c.width=w; c.height=h; return c;};
+  const cs=mkC(), co=mkC(), ci=mkC(); const xs=cs.getContext('2d'), xo=co.getContext('2d'), xi=ci.getContext('2d');
+  const S=xs.createImageData(w,h), O=xo.createImageData(w,h), I=xi.createImageData(w,h);
+  // optional: only the changed letter counts as "wrong"; the rest of a shifted word just settles in gold
+  let ra=[-1e9,1e9], rb=[-1e9,1e9];
+  if(C.hl){ const [pre,la,lb]=C.hl, Z='\u200d', mw=s=>m.measureText(s).width, mg=fs*(C.hlMg||.05);
+    const p0=pre?mw(pre+Z):0; ra=[A.xr-mw(pre+la+Z)-mg, A.xr-p0+mg]; rb=[B.xr-mw(pre+lb+Z)-mg, B.xr-p0+mg]; window.TAILDX=-(mw(pre+lb+Z)-mw(pre+la+Z))/MS;
+    // refine by matching pixels: slide A's tail until it sits on B's tail
+    let bestT=0, bestS=-1; const est=Math.round(window.TAILDX*MS), R=Math.round(fs*.35), st=4;
+    for(let d=est-R; d<=est+R; d+=2){ let sc=0; for(let y=0;y<h;y+=st) for(let x=0;x<ra[0];x+=st){ const xb=x+d; if(xb<0||xb>=rb[0]) continue; sc+=Math.min(da[(y*w+x)*4+3],db[(y*w+xb)*4+3]); } if(sc>bestS){bestS=sc;bestT=d;} }
+    window.TAILDX=bestT/MS; console.log('taildx',est,bestT); }
+  const cT=mkC(), cTi=mkC(); const xT=cT.getContext('2d'), xTi=cTi.getContext('2d'); const T=xT.createImageData(w,h), Ti=xTi.createImageData(w,h);
+  const po=[], pi=[]; let ox0=w,ox1=0,oy0=h,oy1=0;
+  for(let i=0;i<w*h;i++){ const a=da[i*4+3], b=db[i*4+3]; const px=i%w, py=(i/w)|0; const inA=px>=ra[0]&&px<=ra[1], inB=px>=rb[0]&&px<=rb[1];
+    const tail=C.hl&&px<Math.min(ra[0],rb[0]);
+    const lett=C.hl&&(inA||inB); let s=(lett||tail)?0:Math.min(a,b); let o=a-s, n=tail?0:b-s;
+    S.data[i*4]=S.data[i*4+1]=S.data[i*4+2]=255; S.data[i*4+3]=s;
+    T.data[i*4]=T.data[i*4+1]=T.data[i*4+2]=255; Ti.data[i*4]=Ti.data[i*4+1]=Ti.data[i*4+2]=255;
+    if(!inA){ T.data[i*4+3]=o; o=0; } if(!inB){ Ti.data[i*4+3]=n; n=0; }
+    O.data[i*4]=O.data[i*4+1]=O.data[i*4+2]=255; O.data[i*4+3]=o>14?o:0;
+    I.data[i*4]=I.data[i*4+1]=I.data[i*4+2]=255; I.data[i*4+3]=n>14?n:0;
+    if(o>130 && (px+py)%2===0) po.push([px,py]); if(n>130 && (px+py)%2===0) pi.push([px,py]);
+    if(o>60){ox0=Math.min(ox0,px);ox1=Math.max(ox1,px);oy0=Math.min(oy0,py);oy1=Math.max(oy1,py);} }
+  xs.putImageData(S,0,0); xo.putImageData(O,0,0); xi.putImageData(I,0,0); xT.putImageData(T,0,0); xTi.putImageData(Ti,0,0);
+  // word-space units: px/MS, origin at the word centre / baseline
+  M={w,h,cx:w/2,ay,shared:cs,out:co,inn:ci,po,pi,width:Math.max(wa,wb)/MS,
+     focusX:po.length?(((ox0+ox1)/2)-w/2)/MS:0, focusY:po.length?(((oy0+oy1)/2)-ay)/MS:0};
+  M.sharedGold=tint(cs,rgba(P_.text)); M.outRed=tint(co,rgba(P_.wrong)); M.outGlow=tint(co,rgba(P_.wrongGlow));
+  M.tailA=tint(cT,rgba(P_.text)); M.tailB=tint(cTi,rgba(P_.text));
+  M.inGold=tint(ci,rgba(P_.right)); M.inGlow=tint(ci,rgba(P_.rightGlow)); M.sharedGlow=tint(cs,rgba(P_.rightGlow));
+}
+function tint(src,col){ const c=document.createElement('canvas'); c.width=src.width; c.height=src.height; const x=c.getContext('2d'); x.drawImage(src,0,0); x.globalCompositeOperation='source-in'; x.fillStyle=col; x.fillRect(0,0,c.width,c.height); return c; }
+
+function layout(){
+  const m=document.createElement('canvas').getContext('2d'); m.direction='rtl';
+  const L=C.line; // array, null = the target word
+  const ws=()=>{ m.font=`${FS}px AmiriQ`; return L.map(w=>w===null? Math.max(m.measureText(C.wrong).width,m.measureText(C.right).width)+(C.stopMark?FS*.9:0)*0 : m.measureText(w).width); };
+  const gap=()=>FS*.34;
+  FS=C.FS||118; let wd=ws(), tot=wd.reduce((a,b)=>a+b,0)+gap()*(L.length-1);
+  FS=FS*Math.min(1.0,(C.lineMax||820)/tot); wd=ws(); tot=wd.reduce((a,b)=>a+b,0)+gap()*(L.length-1);
+  LINE_Y=700+FS*.3; let xr=tot/2; words=[];
+  L.forEach((w,i)=>{ const cx=xr-wd[i]/2; words.push({txt:w, cx, w:wd[i], target:w===null}); xr-=wd[i]+gap(); });
+  WORD=words.find(w=>w.target);
+}
+
+// ---------- particles with a per-reel flight style ----------
+let P=[];
+const STYLE={
+  drift:(r)=>({cx:(r()-.5)*.4, cy:-.4-.4*r(), sw:(r()-.5)*.35, loops:0}),
+  orbit:(r)=>({cx:(r()-.5)*.2, cy:-.2, sw:.0, loops:1, orb:.55+.35*r()}),
+  embers:(r)=>({cx:-.6-.5*r(), cy:-1.3-.8*r(), sw:(r()-.5)*.5, loops:0}),
+  sky:(r)=>({cx:(r()-.5)*.9, cy:-2.0-1.0*r(), sw:(r()-.5)*.2, loops:0}),
+  swirl:(r)=>({cx:(r()-.5)*.5, cy:-.6, sw:0, loops:2, orb:.35+.3*r()}),
+  ink:(r)=>{const a=r()*6.283, d=.7+.6*r(); return {cx:Math.cos(a)*d, cy:Math.sin(a)*d*.6, sw:0, loops:0, soft:1};},
+  sand:(r)=>({cx:(r()-.5)*.6, cy:1.1+.7*r(), sw:(r()-.5)*.25, loops:0, grav:1}),
+  flow:(r)=>({cx:-.5*r(), cy:-.15-.25*r(), sw:(r()-.5)*.15, loops:0}),
+};
+function buildParticles(){
+  const r=rng(C.seed||41), NP=C.np||300, st=STYLE[C.style||'drift'];
+  if(!M.po.length||!M.pi.length) return;
+  const pick=(arr)=>{const p=arr[(r()*arr.length)|0]; return [(p[0]-M.cx)/MS,(p[1]-M.ay)/MS];};
+  const src=[],dst=[]; for(let i=0;i<NP;i++){ src.push(pick(M.po)); dst.push(pick(M.pi)); }
+  if(C.sortX!==false){ src.sort((a,b)=>a[0]-b[0]+(r()-.5)*1.2); dst.sort((a,b)=>a[0]-b[0]+(r()-.5)*1.2); }
+  const span=FS*.8;
+  for(let i=0;i<NP;i++){ const u=i/NP, s=st(r);
+    P.push({s:src[i], d:dst[i], t0:TL.go+.04+u*.38+r()*.14, dur:1.05+r()*.22, c:[s.cx*span,s.cy*span], sw:s.sw*span, loops:s.loops, orb:(s.orb||0)*FS*.3, ph:r()*6.28, sz:(.3+r()*.42)*(s.soft?1.5:1), tw:r()*6.28, soft:s.soft||0}); }
+}
+function bez(a,c,b,u){ const v=1-u; return v*v*a+2*v*u*c+u*u*b; }
+
+// ---------- backgrounds (one motif per reel) ----------
+const motes=[]; {const r=rng(7+(C.seed||0)); for(let i=0;i<120;i++) motes.push({x:r()*W,y:r()*H,s:.8+r()*2.4,v:4+r()*10,p:r()*6.28});}
+const starsBg=[]; {const r=rng(99+(C.seed||0)); for(let i=0;i<160;i++) starsBg.push({x:r()*W,y:r()*H*.75,s:.5+r()*1.4,p:r()*6.28});}
+function drawBg(t,c){
+  const wk=warmK(t); ctx.setTransform(1,0,0,1,0,0);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,rgba(mixc(P_.top[0],P_.top[1],wk))); g.addColorStop(.4,rgba(mixc(P_.mid[0],P_.mid[1],wk))); g.addColorStop(1,rgba(mixc(P_.bot[0],P_.bot[1],wk)));
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  const py=c.sy;
+  motif(t,wk,c,py);
+  const R=lerp(520,820,wk), a=lerp(.20,.40,wk), lc=mixc(P_.pool[0],P_.pool[1],wk);
+  const lg=ctx.createRadialGradient(TXC,py,0,TXC,py,R); lg.addColorStop(0,rgba(lc,a)); lg.addColorStop(.45,rgba(lc,a*.35)); lg.addColorStop(1,rgba(lc,0)); ctx.fillStyle=lg; ctx.fillRect(0,0,W,H);
+  // motes
+  ctx.save(); ctx.globalCompositeOperation='lighter'; const mc=mixc(P_.mote[0],P_.mote[1],wk);
+  for(const m of motes){ let y=(m.y-t*m.v*(C.moteDir||1))%H; if(y<0)y+=H; const x=m.x+Math.sin(t*.3+m.p)*14; const d=Math.hypot(x-TXC,y-py); const near=clamp(1-d/760);
+    const al=(.08+.3*near)*(.5+.5*Math.sin(t*.9+m.p))*lerp(.6,1.1,wk); if(al<.01)continue;
+    const rg=ctx.createRadialGradient(x,y,0,x,y,m.s*3); rg.addColorStop(0,rgba(mc,al)); rg.addColorStop(1,rgba(mc,0)); ctx.fillStyle=rg; ctx.fillRect(x-m.s*3,y-m.s*3,m.s*6,m.s*6); }
+  ctx.restore();
+  const vg=ctx.createRadialGradient(TXC,py,300,TXC,py,1250); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.55)'); ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+}
+function stars(t,alpha,col=[220,228,255]){ for(const s of starsBg){ const a=alpha*(.35+.4*Math.sin(t*1.1+s.p)); if(a<=0)continue; ctx.fillStyle=rgba(col,a); ctx.beginPath(); ctx.arc(s.x,s.y,s.s,0,7); ctx.fill(); } }
+function motif(t,wk,c,py){
+  const kind=C.motif, k=c.k; ctx.save();
+  if(kind==='moon'){ // a thin crescent high on the left, stars; drifts a little with the pull-back
+    stars(t,.55-.2*wk);
+    const mx=250-30*k, my=330+20*k, R=58; ctx.globalAlpha=.55+.25*wk; ctx.fillStyle=rgba(mixc([210,220,245],[255,232,190],wk));
+    ctx.shadowColor=rgba([200,210,255],.6); ctx.shadowBlur=40; ctx.beginPath(); ctx.arc(mx,my,R,0,7); ctx.fill(); ctx.shadowBlur=0;
+    ctx.globalCompositeOperation='destination-out'; ctx.beginPath(); ctx.arc(mx+24,my-14,R*.92,0,7); ctx.fill();
+  } else if(kind==='horizon'){ // a low horizon: dim cold embers at the mistake, a soft sunrise after the fix
+    const hy=1260; const hc=mixc([90,40,30],[255,190,110],wk);
+    const hg=ctx.createRadialGradient(TXC,hy,0,TXC,hy,900); hg.addColorStop(0,rgba(hc,.35+.35*wk)); hg.addColorStop(1,rgba(hc,0)); ctx.fillStyle=hg; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=rgba(mixc([8,6,8],[22,14,10],wk),.9); ctx.fillRect(0,hy,W,H-hy);
+    ctx.strokeStyle=rgba(mixc([140,70,50],[255,214,150],wk),.35); ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(0,hy); ctx.lineTo(W,hy); ctx.stroke();
+  } else if(kind==='sun'){ // the wrong meaning: a sun's glare behind the word, setting away as the shadda lands; stars come out
+    const sk=1-sm(inv(3.6,6.2,t))*(1-sm(inv(13.8,14.9,t)));
+    const sy=lerp(300,820,1-sk), sc=[255,170,90];
+    const sg=ctx.createRadialGradient(TXC,sy,0,TXC,sy,520); sg.addColorStop(0,rgba(sc,.55*sk)); sg.addColorStop(.18,rgba(sc,.25*sk)); sg.addColorStop(1,rgba(sc,0)); ctx.fillStyle=sg; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=rgba([255,200,140],.45*sk); ctx.beginPath(); ctx.arc(TXC,sy,70,0,7); ctx.fill();
+    stars(t,.6*(1-sk));
+  } else if(kind==='path'){ // a road of light to the horizon; it brightens when "guide us" returns
+    const vx=TXC, vy=520, by=1500; const a=.10+.30*wk;
+    for(let i=-6;i<=6;i++){ ctx.strokeStyle=rgba(mixc([170,150,200],[255,222,160],wk),a*(1-Math.abs(i)/7)*(i===0?0:1)); ctx.lineWidth=1.2; ctx.beginPath(); ctx.moveTo(vx,vy); ctx.lineTo(vx+i*120,by); ctx.stroke(); }
+    const pg=ctx.createLinearGradient(0,vy,0,by); pg.addColorStop(0,rgba([255,226,170],.0)); pg.addColorStop(1,rgba([255,226,170],.10+.25*wk));
+    ctx.fillStyle=pg; ctx.beginPath(); ctx.moveTo(vx-4,vy); ctx.lineTo(vx+4,vy); ctx.lineTo(vx+150,by); ctx.lineTo(vx-150,by); ctx.closePath(); ctx.fill();
+  } else if(kind==='ripples'){ // slow water rings opening under the word
+    const cx=TXC, cy=1080; for(let i=0;i<7;i++){ const ph=((t/END*3+i/7)%1); const r=60+ph*620; const a=(1-ph)*(.12+.12*wk);
+      ctx.strokeStyle=rgba(mixc([120,200,200],[220,240,220],wk),a); ctx.lineWidth=1.4; ctx.beginPath(); ctx.ellipse(cx,cy,r,r*.22,0,0,7); ctx.stroke(); }
+  } else if(kind==='dunes'){ // layered dunes, still; light warms them after the fix
+    const layers=[[1180,[60,44,36],[150,104,70]],[1290,[42,30,26],[118,80,54]],[1400,[26,19,17],[80,54,38]]];
+    layers.forEach(([y0,c0,c1],li)=>{ ctx.fillStyle=rgba(mixc(c0,c1,wk),.95); ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(0,y0);
+      for(let x=0;x<=W;x+=20){ ctx.lineTo(x,y0+Math.sin(x*.004+li*1.7)*40+Math.sin(x*.011+li)*14); } ctx.lineTo(W,H); ctx.closePath(); ctx.fill(); });
+  } else if(kind==='arch'){ // a quiet mihrab arch framing the line
+    const ax=TXC, top=430, bot=1180, hw=330; ctx.strokeStyle=rgba(mixc([150,170,210],[255,220,160],wk),.12+.16*wk); ctx.lineWidth=2;
+    for(const d of [0,22]){ ctx.beginPath(); ctx.moveTo(ax-hw+d,bot); ctx.lineTo(ax-hw+d,top+260); ctx.quadraticCurveTo(ax-hw+d,top+40+d,ax,top+d); ctx.quadraticCurveTo(ax+hw-d,top+40+d,ax+hw-d,top+260); ctx.lineTo(ax+hw-d,bot); ctx.stroke(); }
+    stars(t,.25);
+  }
+  ctx.restore();
+}
+
+// ---------- the line ----------
+function fillWord(w,alpha,glow,col){
+  ctx.font=`${FS}px AmiriQ`; ctx.direction='rtl'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.globalAlpha=alpha; ctx.shadowColor=rgba(P_.rightGlow,.5*glow); ctx.shadowBlur=18*glow;
+  ctx.fillStyle=rgba(col||P_.text); ctx.fillText(w.txt,w.cx,LINE_Y); ctx.shadowBlur=0; ctx.globalAlpha=1;
+}
+function revealWord(w,p,alpha){
+  if(p<=0||alpha<=0) return; if(p>=1){ fillWord(w,alpha,1); return; }
+  const x0=w.cx+w.w/2+FS*.2, x1=w.cx-w.w/2-FS*.2; const ex=lerp(x0,x1,p), fe=FS*.55;
+  ctx.save(); ctx.beginPath(); ctx.rect(ex,LINE_Y-FS*1.6,x0-ex+FS,FS*2.6); ctx.clip(); fillWord(w,alpha,1); ctx.restore();
+  for(let k=0;k<6;k++){ ctx.save(); ctx.beginPath(); ctx.rect(ex-fe*(k+1)/6,LINE_Y-FS*1.6,fe/6,FS*2.6); ctx.clip(); fillWord(w,alpha*(1-(k+.5)/6)*.9,1); ctx.restore(); }
+}
+function drawMaskImg(img,alpha,scale=1,ox=0,oy=0,blur=0){
+  if(alpha<=.001) return; ctx.save();
+  const fx=WORD.cx+M.focusX, fy=LINE_Y+M.focusY; ctx.translate(fx+ox,fy+oy); ctx.scale(scale,scale); ctx.translate(-fx,-fy);
+  if(blur) ctx.filter=`blur(${blur}px)`; ctx.globalAlpha=clamp(alpha);
+  ctx.drawImage(img,WORD.cx-M.cx/MS,LINE_Y-M.ay/MS,M.w/MS,M.h/MS); ctx.restore();
+}
+function pulse(t,t0){ const x=t-t0; if(x<0||x>1.6) return 0; return x<.35? Math.sin(Math.PI*x/.35*.5) : Math.exp(-(x-.35)*3.2); }
+function drawLine(t,c){
+  worldT(c); const wk=warmK(t);
+  const others=sm(inv(TL.w0-.1,TL.w0+.3,t))*(1-sm(inv(13.3,14.1,t)));
+  // shared part of the target word (always there)
+  drawMaskImg(M.sharedGlow,.35+.3*wk,1,0,0,6); drawMaskImg(M.sharedGold,1);
+  let wi=0; words.forEach(w=>{ if(w.target) return; const t0=TL.w0+(wi++)*TL.wstep; revealWord(w,sm(inv(t0,t0+.9,t)),others); });
+  // the rest of a shifted word: settles from the old place to the new one while the letter changes
+  { const k=smr(inv(TL.go-.1,TL.land-.2,t))*(1-smr(inv(13.8,14.9,t))); drawMaskImg(M.tailA,1,1,(window.TAILDX||0)*k,0); }
+  // wrong part
+  const loopBack=sm(inv(13.8,14.9,t));
+  if(t<TL.go+.6){ const pu=pulse(t,TL.hit1)*.7+pulse(t,TL.hit2);
+    const hes=t>TL.hes? Math.sin((t-TL.hes)*21)*.35*sm(inv(TL.hes,TL.hes+.3,t))*(1-sm(inv(TL.go-.1,TL.go,t))) : 0;
+    const lift=-sm(inv(TL.hes,TL.go,t))*1.6, fade=1-sm(inv(TL.go,TL.go+.42,t));
+    drawMaskImg(M.outGlow,(.5+.9*pu)*fade,1+.06*pu,hes,lift,7); drawMaskImg(M.outRed,fade,1+.06*pu,hes,lift); }
+  if(loopBack>0){ drawMaskImg(M.outGlow,.5*loopBack,1,0,0,7); drawMaskImg(M.outRed,loopBack); }
+  // right part forms as particles land
+  const landed=sm(inv(TL.land-.45,TL.land+.15,t))*(1-loopBack);
+  if(landed>0){ const after=Math.max(0,t-TL.land); drawMaskImg(M.inGlow,landed*(.6+1.1*Math.exp(-after*1.6)),1,0,0,7); drawMaskImg(M.inGold,landed,1+.1*Math.exp(-after*5)*(t>TL.land?1:0)); }
+  if(t>TL.go-.05&&t<TL.land+.6) drawParticles(t);
+  if(t>TL.ripple&&t<TL.ripple+1.8) drawRipple(t);
+  ctx.setTransform(1,0,0,1,0,0);
+}
+function drawParticles(t){
+  ctx.save(); ctx.globalCompositeOperation='lighter'; const ox=WORD.cx, oy=LINE_Y;
+  for(const p of P){ const u=(t-p.t0)/p.dur; if(u<-.25||u>1.15) continue; let x,y,al,col,sz=p.sz;
+    if(u<0){ const k=1+u*4; x=p.s[0]; y=p.s[1]-.6*k; al=clamp(k)*.8; col=P_.wrong; }
+    else{ const e=smr(clamp(u)), arc=Math.sin(Math.PI*clamp(u)); const mid=[(p.s[0]+p.d[0])/2+p.c[0],(p.s[1]+p.d[1])/2+p.c[1]];
+      x=bez(p.s[0],mid[0],p.d[0],e)+Math.sin(p.ph+u*5.2)*p.sw*arc; y=bez(p.s[1],mid[1],p.d[1],e);
+      if(p.loops){ const a=p.ph+e*p.loops*6.283; x+=Math.cos(a)*p.orb*arc; y+=Math.sin(a)*p.orb*arc*.7; }
+      col=mixc(P_.wrong,P_.particle,sm(clamp(u*1.3))); al=u>1? clamp(1-(u-1)/.15):1; sz=p.sz*(1+.5*arc*(p.soft?1.6:1)); }
+    al*=(p.soft?.3:.42)*(.7+.3*Math.sin(t*14+p.tw));
+    const r=sz*2.6; const g=ctx.createRadialGradient(ox+x,oy+y,0,ox+x,oy+y,r); g.addColorStop(0,rgba(col,al)); g.addColorStop(.35,rgba(col,al*.45)); g.addColorStop(1,rgba(col,0));
+    ctx.fillStyle=g; ctx.fillRect(ox+x-r,oy+y-r,r*2,r*2); }
+  ctx.restore();
+}
+function drawRipple(t){
+  const u=(t-TL.ripple)/1.6; const fx=WORD.cx+M.focusX, fy=LINE_Y+M.focusY;
+  const rr=lerp(4,FS*1.25,smr(clamp(u*1.3))), ra=.45*(1-clamp(u*1.3)); if(ra<=0) return;
+  ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.strokeStyle=rgba(P_.rightGlow,ra); ctx.lineWidth=1.3; ctx.beginPath(); ctx.arc(fx,fy,rr,0,7); ctx.stroke();
+  ctx.strokeStyle=rgba(P_.rightGlow,ra*.5); ctx.beginPath(); ctx.arc(fx,fy,rr*.66,0,7); ctx.stroke(); ctx.restore();
+}
+
+// ---------- screen text ----------
+function txt(s,x,y,font,col,alpha,o={}){ if(alpha<=.002) return; ctx.save(); ctx.font=font; ctx.direction=o.rtl?'rtl':'ltr'; ctx.textAlign='center'; ctx.textBaseline='middle'; if(o.ls) ctx.letterSpacing=o.ls;
+  ctx.globalAlpha=alpha; ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=16; ctx.fillStyle=col; ctx.fillText(s,x,y+(o.dy||0)); ctx.restore(); }
+// parts: [text, kind] kind: 0 plain, 1 wrong accent, 2 right accent
+function runs(parts,x,y,font,alpha,dy=0,blur=0){ if(alpha<=.002) return; ctx.save(); ctx.font=font; ctx.direction='ltr'; ctx.textAlign='left'; ctx.textBaseline='middle';
+  let tw=0; parts.forEach(p=>tw+=ctx.measureText(p[0]).width); let cx=x-tw/2; ctx.globalAlpha=alpha; if(blur) ctx.filter=`blur(${blur}px)`;
+  parts.forEach(p=>{ const k=p[1]||0; ctx.fillStyle=k===1?rgba(P_.wrongText):k===2?rgba(P_.rightText):'#efe6d2'; ctx.shadowColor=k===1?rgba(P_.wrong,.75):k===2?rgba(P_.rightGlow,.85):'rgba(0,0,0,.65)'; ctx.shadowBlur=k?22:16;
+    ctx.fillText(p[0],cx,y+dy); cx+=ctx.measureText(p[0]).width; }); ctx.restore(); }
+function wrapRuns(parts,x,y,font,alpha,dy,blur,maxW,lh){ // split runs into two lines if too wide
+  ctx.save(); ctx.font=font; let tw=0; parts.forEach(p=>tw+=ctx.measureText(p[0]).width); ctx.restore();
+  if(tw<=maxW){ runs(parts,x,y,font,alpha,dy,blur); return; }
+  // split at the word boundary nearest the middle
+  const flat=[]; parts.forEach(p=>p[0].split(/(\s+)/).forEach(s=>{ if(s) flat.push([s,p[1]]); }));
+  ctx.save(); ctx.font=font; let acc=0, cut=0; for(let i=0;i<flat.length;i++){ acc+=ctx.measureText(flat[i][0]).width; if(acc>tw/2&&/\s/.test(flat[i][0])){cut=i;break;} } ctx.restore();
+  runs(flat.slice(0,cut),x,y-lh/2,font,alpha,dy,blur); runs(flat.slice(cut+1),x,y+lh/2,font,alpha,dy,blur);
+}
+function drawText(t,c){
+  const loopIn=sm(inv(13.8,14.9,t));
+  const hook=Math.max(1-sm(inv(TL.pull0,TL.pull0+.9,t)),loopIn);
+  txt(C.hookAr,TXC,330,'48px Amiri','#efe6d2',hook*.95,{rtl:true});
+  txt(C.hookEn,TXC,402,'34px Corm',rgba(P_.hookEn),hook*.85,{ls:'5px'});
+  const blockA=Math.max(1-sm(inv(6.0,6.8,t)),loopIn);
+  const sw=sm(inv(TL.land+.05,TL.land+.95,t))*(1-loopIn); const wrong=(1-sw)*blockA, right=sw*blockA; const aft=t>TL.land?1:0;
+  const YT=1030, YM=1120;
+  runs(C.wrongTr,TXC,YT,'italic 58px CormI',wrong*.95,0,(1-wrong)*6*aft);
+  wrapRuns(C.wrongMean,TXC,YM,`${C.meanFs||74}px Corm`,wrong,(1-wrong)*8*aft,(1-wrong)*6*aft,860,84);
+  runs(C.rightTr,TXC,YT,'italic 58px CormI',right*.95,(1-right)*-10,(1-right)*6);
+  wrapRuns(C.rightMean,TXC,YM,`${C.meanFs||74}px Corm`,right,(1-right)*-12,(1-right)*6,860,84);
+  const tr=sm(inv(TL.trans,TL.trans+1.2,t))*(1-sm(inv(13.3,14.0,t)));
+  const ly=c.sy+(LINE_Y-c.fy)*c.s;
+  txt(C.ref,TXC,ly-FS*c.s*1.95,'30px Corm',rgba(P_.hookEn),tr*.8,{ls:'7px',dy:(1-tr)*8});
+  wrapRuns(C.trans,TXC,ly+FS*c.s*.95+(C.transDy||0),'italic 56px CormI',tr,(1-tr)*10,(1-tr)*5,860,66);
+  txt('Ayah Studio',TXC,1300,'30px Corm','#e6dcc6',.55,{ls:'6px'});
+}
+
+window.draw=function(t){
+  t=((t%END)+END)%END; ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over'; ctx.filter='none';
+  const c=cam(t); drawBg(t,c); drawLine(t,c); drawText(t,c);
+  if(window.SAFE){ ctx.setTransform(1,0,0,1,0,0); ctx.strokeStyle='red'; ctx.lineWidth=2; ctx.strokeRect(0,270,940,980); }
+};
+window.ready=(async()=>{
+  await Promise.all(['AmiriQ','Amiri','Corm','CormI'].map(f=>document.fonts.load(`40px ${f}`,f.startsWith('Amir')?'أب':'Ab')));
+  await document.fonts.load('40px AmiriQ',C.right+C.wrong); await document.fonts.ready;
+  layout(); buildMasks(); buildParticles();
+  console.log('ready FS',FS.toFixed(1),'out',M.po.length,'in',M.pi.length,'focus',M.focusX.toFixed(1),M.focusY.toFixed(1));
+  draw(0); return true;
+})();
+</script></body></html>
