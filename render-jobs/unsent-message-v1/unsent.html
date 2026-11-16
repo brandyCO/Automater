@@ -1,0 +1,456 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:'AmiriQ';src:url(amiri.woff2) format('woff2');}
+@font-face{font-family:'Corm';src:url(corm.woff2) format('woff2');}
+@font-face{font-family:'CormI';src:url(cormi.woff2) format('woff2');}
+@font-face{font-family:'InterU';src:url(inter.otf) format('opentype');}
+html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}
+</style></head><body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// The unsent message (2:186). One continuous take, deterministic draw(t), loops at END.
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const END=41.0, W_=1080, H_=1920;
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const lerp=(a,b,u)=>a+(b-a)*u;
+const sm=u=>{u=clamp(u);return u*u*u*(u*(u*6-15)+10);};
+const inv=(a,b,t)=>clamp((t-a)/(b-a));
+const ss=(a,b,t)=>sm(inv(a,b,t));
+const bell=(a,b,t)=>{const m=(a+b)/2;return ss(a,m,t)*(1-ss(m,b,t));};
+const EZ={io:sm, lin:u=>u, o:u=>1-Math.pow(1-u,3), i:u=>u*u*u, o2:u=>Math.sin(u*Math.PI/2)};
+function K(keys,t){
+  if(t<=keys[0][0]) return keys[0][1];
+  for(let i=0;i<keys.length-1;i++){const a=keys[i],b=keys[i+1]; if(t<=b[0]){const u=(t-a[0])/(b[0]-a[0]); return lerp(a[1],b[1],(EZ[b[2]||'io'])(u));}}
+  return keys[keys.length-1][1];
+}
+function KL(keys,t){return Math.exp(K(keys.map(k=>[k[0],Math.log(k[1]),k[2]]),t));}
+const mixc=(a,b,u)=>[lerp(a[0],b[0],u),lerp(a[1],b[1],u),lerp(a[2],b[2],u)];
+const rgb=(c,a=1)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const hx=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+function rng(seed){let s=seed>>>0;return()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296;};}
+
+// ---------------- timeline ----------------
+const TR={
+ lean:[[0,.25],[1.12,.25],[1.5,-.22,'o'],[2.7,-.2],[3.3,.14],[4.85,.16],[5.02,.22],[5.42,1.0,'i'],[5.6,.96,'o'],[10.7,.97],[11.9,.42],[13.0,.38],[15.6,.36],[17.0,.34],[17.7,.3],[19.2,.3],[22.5,.1],[25.5,-.2],[38.6,-.2],[40.6,.25],[41,.25]],
+ pitch:[[0,.38],[1.12,.38],[1.5,-.12,'o'],[2.7,-.1],[3.3,.32],[4.9,.36],[5.42,1,'i'],[10.7,1],[11.9,.25],[12.4,.38],[14.1,.38],[14.45,.02],[15.3,.02],[15.75,.4],[17.0,.42],[17.7,.55],[19.6,.55],[21.6,-.22],[24.5,-.26],[26.5,-.12],[38.6,-.12],[40.6,.38],[41,.38]],
+ turn:[[0,0],[14.1,0],[14.55,.6],[15.3,.6],[15.75,0],[41,0]],
+ lid:[[0,.32],[1.12,.32],[1.5,.5],[2.7,.5],[3.3,.36],[5.2,.42],[5.5,.85],[10.7,.85],[11.9,.5],[15.6,.42],[16.9,.62],[17.7,.9],[19.6,.9],[20.8,.12],[23.8,.1],[25.2,.3],[26.4,1.0],[38.6,1.0],[40.0,.4],[41,.32]],
+ lookX:[[0,0],[1.5,-.3],[2.7,-.3],[3.3,0],[14.1,0],[14.45,.9],[15.35,.9],[15.75,0],[41,0]],
+ lookY:[[0,.85],[1.12,.85],[1.5,-.45],[2.7,-.4],[3.3,.8],[11.9,.2],[12.4,.85],[14.1,.85],[14.45,.1],[15.4,.1],[15.8,.85],[17.7,.9],[19.6,.9],[21.6,-.95],[24.5,-.8],[38.6,-.8],[40.4,.85],[41,.85]],
+ brow:[[0,.75],[5.5,.95],[17.0,.9],[19.8,.9],[22.5,.3],[26,0],[38.6,0],[40.6,.75],[41,.75]],
+ smile:[[0,0],[24.2,0],[27.2,.8],[38.6,.8],[39.8,0],[41,0]],
+ py:[[0,1060],[1.12,1060],[1.55,1262,'o'],[2.7,1258],[3.3,1075],[4.9,1075],[5.12,1100],[5.62,1335,'i'],[11.0,1335],[12.3,1090],[17.0,1090],[17.7,1112],[23.5,1112],[26,1205],[38.6,1205],[40.5,1060],[41,1060]],
+ flat:[[0,0],[17.0,0],[17.7,1],[38.6,1],[40.3,0],[41,0]],
+ wheel:[[0,0],[5.02,0],[5.5,1,'o'],[10.8,1],[11.8,0],[41,0]],
+ n:[[0,12],[1.0,12],[1.32,0,'lin'],[3.4,0],[4.6,11,'lin'],[4.86,11],[5.04,0,'lin'],[12.6,0],[13.12,3,'lin'],[13.85,3],[14.1,0,'lin'],[40.05,0],[40.9,12,'lin'],[41,12]],
+ bub:[[0,1],[1.35,1],[1.7,0],[3.1,0],[3.45,1],[5.08,1],[5.35,0],[12.35,0],[12.6,1],[14.15,1],[14.5,0],[39.7,0],[40.2,1],[41,1]],
+ glow:[[0,1],[1.3,1],[1.6,.45],[3.0,.45],[3.4,.95],[5.3,.6],[5.8,.2],[11.0,.2],[12.3,.95],[15.6,.95],[17.0,.05],[38.6,0],[40.3,1],[41,1]],
+ W:[[0,0],[19.2,0],[31,1,'o2'],[38.6,1],[40.8,0],[41,0]],
+ R:[[0,1],[20.6,1],[27.2,0],[38.6,0],[40.6,1],[41,1]],
+ Z:[[0,1],[7.9,1.02],[9.6,.24],[10.7,.24],[12.1,.96],[16.4,1.04],[17.6,1.22],[19.4,1.22],[23,1.0],[31,.5],[38.6,.5],[40.9,1],[41,1]],
+ CX:[[0,505],[7.9,505],[9.6,540],[10.7,540],[12.1,505],[16.4,500],[17.6,478],[19.4,478],[23,505],[31,540],[38.6,540],[40.9,505],[41,505]],
+ CY:[[0,975],[7.9,985],[9.6,960],[10.7,960],[12.1,975],[16.4,975],[17.6,960],[19.4,960],[21.6,880],[23,900],[31,585],[38.6,585],[40.9,975],[41,975]],
+};
+const TYPE=[[3.40,[3.48,3.60,3.69,3.86,3.95,4.03,4.21,4.30,4.38,4.49,4.60]],[12.6,[12.72,12.95,13.12]],[40.05,[40.12,40.19,40.27,40.40,40.46,40.53,40.61,40.70,40.75,40.80,40.86,40.90]]];
+function nAt(t){for(const[a,ks]of TYPE){if(t>=a&&t<=ks[ks.length-1]+.001){let n=0;for(const k of ks){if(t>=k)n++;else{n+=clamp(1-(k-t)/.04)*0;break;}}return n;}} return K(TR.n,t);}
+const tv=(k,t)=>k==='n'?nAt(t):K(TR[k],t);
+const MSG="I'm not okay";
+const HITS=[[1.45,55],[5.45,85]];
+function hitOff(t){let d=0;for(const[h,a]of HITS){const x=t-h;if(x<0)continue;d+=x<.1?a*sm(x/.1):a*Math.exp(-(x-.1)*3.2)*Math.cos((x-.1)*5.2);}return d;}
+function blink(t){let b=0;for(const bt of [2.2,3.9,12.15,13.5,16.2,29.0]){b=Math.max(b,bell(bt,bt+.2,t));}return b;}
+function breath(t){const W=tv('W',t);const per=lerp(3.6,5.4,W);return Math.sin(2*Math.PI*t/per);}
+
+// ---------------- camera ----------------
+function cam(t){
+  const Z=KL(TR.Z,t), W=tv('W',t);
+  let CX=tv('CX',t), CY=tv('CY',t);
+  const drift=(1-W)*(1-ss(16.6,17.6,t)*(1-ss(19.3,20,t)));
+  CX+= (2.2*Math.sin(t*.61)+1.3*Math.sin(t*1.37+1))*drift/Z;
+  CY+= (1.8*Math.sin(t*.53+2)+1.1*Math.sin(t*1.11))*drift/Z;
+  CY-= hitOff(t)/Z;
+  return {Z,CX,CY};
+}
+function setCam(c){ctx.setTransform(c.Z,0,0,c.Z,540-c.CX*c.Z,960-c.CY*c.Z);}
+const toScr=(c,x,y)=>[540+(x-c.CX)*c.Z,960+(y-c.CY)*c.Z];
+
+// ---------------- palette ----------------
+const P={skin:hx('#e3a87b'),skinD:hx('#c98b60'),hair:hx('#221710'),beard:hx('#2a1b13'),shirt:hx('#8f969f'),shirtD:hx('#767c86'),
+ seat:hx('#2f3339'),seatH:hx('#3b4047'),ceil:hx('#3c3f45'),dash:hx('#25282d'),wheel:hx('#1c1e22'),paint:hx('#3e5e7c'),paintD:hx('#2d4862'),paintH:hx('#5d7f9e')};
+const fc=(c,a=1)=>rgb(c,a);
+
+// ---------------- sky & world ----------------
+function skyCols(W){return {top:mixc([92,102,114],[236,176,118],W), bot:mixc([150,158,166],[255,226,178],W)};}
+function drawSky(t,W){
+  ctx.setTransform(1,0,0,1,0,0); const s=skyCols(W);
+  const g=ctx.createLinearGradient(0,0,0,H_); g.addColorStop(0,rgb(s.top)); g.addColorStop(1,rgb(s.bot)); ctx.fillStyle=g; ctx.fillRect(0,0,W_,H_);
+  // warm opening in the clouds (upper right)
+  if(W>0){const r=ctx.createRadialGradient(860,560,0,860,560,1100); r.addColorStop(0,`rgba(255,240,205,${.75*W})`); r.addColorStop(.35,`rgba(255,214,150,${.35*W})`); r.addColorStop(1,'rgba(255,200,140,0)'); ctx.fillStyle=r; ctx.fillRect(0,0,W_,H_);}
+  // clouds: soft heavy blobs that part as the light comes
+  const R=rng(7); ctx.save();
+  for(let i=0;i<16;i++){const bx=R()*1500-200, by=R()*900-100, rr=220+R()*260, sp=(R()-.5)*6; const part=(bx<540?-1:1)*W*520;
+    const x=bx+sp*t+part, y=by-W*120, a=(.22+R()*.18)*(1-W*.85);
+    const g2=ctx.createRadialGradient(x,y,0,x,y,rr); const cc=mixc([118,126,136],[255,236,210],W); g2.addColorStop(0,rgb(cc,a)); g2.addColorStop(1,rgb(cc,0)); ctx.fillStyle=g2; ctx.fillRect(x-rr,y-rr,rr*2,rr*2);}
+  ctx.restore();
+}
+function drawWorld(t,c,W,R){
+  setCam(c);
+  // distant low buildings and trees at the horizon (world y 710)
+  const fog=mixc([128,136,146],[236,196,150],W);
+  ctx.fillStyle=rgb(fog,.9); const Rb=rng(11); let x=-2600;
+  while(x<3700){const w=180+Rb()*320,h=60+Rb()*170; ctx.fillRect(x,710-h,w,h+2); x+=w+Rb()*60;}
+  ctx.fillStyle=rgb(mixc([110,118,128],[214,170,124],W),.95); x=-2600; while(x<3700){const w=120+Rb()*200,h=30+Rb()*70; ctx.beginPath(); ctx.ellipse(x,710,w,h,0,Math.PI,0); ctx.fill(); x+=w*1.4;}
+  // asphalt
+  const g=ctx.createLinearGradient(0,708,0,4200); g.addColorStop(0,rgb(mixc([96,103,112],[214,176,134],W))); g.addColorStop(.25,rgb(mixc([66,72,80],[150,118,92],W))); g.addColorStop(1,rgb(mixc([46,50,57],[104,82,66],W)));
+  ctx.fillStyle=g; ctx.fillRect(-4000,708,9000,4000);
+  // wet sheen band + puddles reflecting the sky
+  const pc=mixc([140,150,160],[255,214,150],W);
+  for(const [px,py,rx,ry] of [[-620,2350,360,46],[1700,2260,300,38],[300,2650,520,60],[-1400,1600,260,26],[2500,1500,220,22],[1150,3100,420,52]]){
+    const pg=ctx.createRadialGradient(px,py,0,px,py,rx); pg.addColorStop(0,rgb(pc,.42)); pg.addColorStop(1,rgb(pc,0)); ctx.save(); ctx.translate(px,py); ctx.scale(1,ry/rx); ctx.translate(-px,-py); ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(px,py,rx,0,7); ctx.fill(); ctx.restore();}
+  // parking lines (perspective toward the horizon)
+  ctx.strokeStyle=rgb(mixc([196,200,204],[255,240,214],W),.55); ctx.lineCap='round';
+  for(const bx of [-1650,-700,1780,2730]){ctx.lineWidth=26; ctx.beginPath(); ctx.moveTo(540+(bx-540)*.42,900); ctx.lineTo(bx,2600); ctx.stroke();}
+  ctx.lineWidth=22; ctx.beginPath(); ctx.moveTo(-2200,2600); ctx.lineTo(3300,2600); ctx.stroke();
+  // two lamp posts
+  for(const lx of [-1500,2600]){ctx.fillStyle=rgb(mixc([60,66,74],[120,96,80],W)); ctx.fillRect(lx-14,-600,28,1900); ctx.fillRect(lx-14,-600,lx<0?190:-190,22);}
+  // shadow under the car
+  const sh=ctx.createRadialGradient(540,2070,0,540,2070,1000); sh.addColorStop(0,'rgba(10,12,16,.55)'); sh.addColorStop(1,'rgba(10,12,16,0)');
+  ctx.save(); ctx.translate(540,2070); ctx.scale(1,.12); ctx.translate(-540,-2070); ctx.fillStyle=sh; ctx.beginPath(); ctx.arc(540,2070,1000,0,7); ctx.fill(); ctx.restore();
+}
+// ---------------- car ----------------
+const WS=[[40,250],[1040,250],[1170,1335],[-90,1335]];
+function wsPath(){ctx.beginPath(); ctx.moveTo(110,250); ctx.lineTo(970,250); ctx.quadraticCurveTo(1040,250,1048,318); ctx.lineTo(1170,1335); ctx.lineTo(-90,1335); ctx.lineTo(32,318); ctx.quadraticCurveTo(40,250,110,250); ctx.closePath();}
+function drawCarBody(t,W){
+  const pc=mixc(P.paint,[96,120,140],0), pd=P.paintD;
+  // wheels
+  ctx.fillStyle='#121316'; rr(-300,1850,230,220,40); ctx.fill(); rr(1150,1850,230,220,40); ctx.fill();
+  // mirrors
+  ctx.fillStyle=fc(pd); ctx.beginPath(); ctx.ellipse(-360,1215,120,72,-.12,0,7); ctx.fill(); ctx.beginPath(); ctx.ellipse(1440,1215,120,72,.12,0,7); ctx.fill();
+  ctx.fillStyle=fc(pc); ctx.beginPath(); ctx.ellipse(-360,1205,112,62,-.12,0,7); ctx.fill(); ctx.beginPath(); ctx.ellipse(1440,1205,112,62,.12,0,7); ctx.fill();
+  // body
+  ctx.beginPath(); ctx.moveTo(80,168); ctx.lineTo(1000,168); ctx.quadraticCurveTo(1090,170,1100,262); ctx.lineTo(1250,1290); ctx.quadraticCurveTo(1410,1310,1416,1400);
+  ctx.lineTo(1416,1870); ctx.quadraticCurveTo(1410,1950,1320,1952); ctx.lineTo(-240,1952); ctx.quadraticCurveTo(-330,1950,-336,1870); ctx.lineTo(-336,1400); ctx.quadraticCurveTo(-330,1310,-170,1290); ctx.lineTo(-20,262); ctx.quadraticCurveTo(-10,170,80,168); ctx.closePath();
+  const g=ctx.createLinearGradient(0,160,0,1960); g.addColorStop(0,fc(P.paintH)); g.addColorStop(.12,fc(pc)); g.addColorStop(.62,fc(pc)); g.addColorStop(1,fc(pd)); ctx.fillStyle=g; ctx.fill();
+  // hood highlight + crease
+  const hg=ctx.createLinearGradient(0,1340,0,1650); hg.addColorStop(0,'rgba(255,255,255,.10)'); hg.addColorStop(1,'rgba(255,255,255,0)'); ctx.fillStyle=hg;
+  ctx.beginPath(); ctx.moveTo(-150,1345); ctx.lineTo(1230,1345); ctx.lineTo(1380,1640); ctx.lineTo(-300,1640); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.14)'; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(-300,1645); ctx.quadraticCurveTo(540,1675,1380,1645); ctx.stroke();
+  // headlights, grille, bumper
+  const hl=mixc([206,214,222],[255,240,210],W);
+  ctx.fillStyle='#1b2028'; rr(-262,1690,400,108,46); ctx.fill(); rr(942,1690,400,108,46); ctx.fill();
+  ctx.fillStyle=rgb(hl,.9); rr(-246,1704,368,80,38); ctx.fill(); rr(958,1704,368,80,38); ctx.fill();
+  ctx.fillStyle='#1a1e25'; rr(270,1712,540,120,40); ctx.fill();
+  ctx.fillStyle=fc(pd); rr(-320,1860,1720,90,40); ctx.fill();
+  ctx.fillStyle=rgb(mixc([200,204,210],[250,240,220],W),.9); rr(420,1866,240,64,10); ctx.fill();
+}
+function rr(x,y,w,h,r){ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();}
+
+// ---------------- the man ----------------
+function ik(sx,sy,hx_,hy,l1,l2,side){
+  let dx=hx_-sx, dy=hy-sy, d=Math.hypot(dx,dy); const dd=Math.min(d,l1+l2-1);
+  const a=Math.atan2(dy,dx), c=clamp((l1*l1+dd*dd-l2*l2)/(2*l1*dd),-1,1), b=Math.acos(c);
+  const ang=a+side*b; return [sx+Math.cos(ang)*l1, sy+Math.sin(ang)*l1];
+}
+function pose(t){
+  const f=tv('lean',t), p=tv('pitch',t), turn=tv('turn',t), br=breath(t), W=tv('W',t);
+  const heave=bell(5.5,10.8,t)*Math.sin((t-5.5)*2*Math.PI/2.6)*.5+.5*bell(5.5,10.8,t);
+  const exhale=bell(25.6,28.4,t);
+  const cx=470+turn*8;
+  const shY=880+(f>0?f*320:f*70)-br*lerp(4.5,3,W)+heave*7+exhale*10;
+  const shW=205*(1+Math.max(f,0)*.12);
+  const hxp=470+turn*22, hyp=(f>0?655+f*385:655+f*95)-br*lerp(3,2,W)+heave*5+exhale*6;
+  const hs=1+Math.max(f,0)*.1+Math.min(f,0)*.14;
+  // phone + hands
+  const py=tv('py',t), flat=tv('flat',t), wh=tv('wheel',t);
+  const shake=((1-ss(1.0,1.15,t))+ss(40.6,40.9,t))*Math.sin(t*41)*1.6;
+  const px=470+shake;
+  let hl=[px-86,py+28], hr=[px+86,py+28];
+  // dua: cupped palms together under the phone
+  hl=[lerp(hl[0],470-62,flat),lerp(hl[1],py+34,flat)]; hr=[lerp(hr[0],470+62,flat),lerp(hr[1],py+34,flat)];
+  // collapsed: forearms on the wheel rim either side of his head
+  hl=[lerp(hl[0],470-215,wh),lerp(hl[1],1196,wh)]; hr=[lerp(hr[0],470+215,wh),lerp(hr[1],1196,wh)];
+  return {f,p,turn,cx,shY,shW,hxp,hyp,hs,px,py,flat,wh,hl,hr,W};
+}
+function drawTorso(s){
+  const {cx,shY,shW}=s;
+  ctx.fillStyle=fc(P.shirt);
+  ctx.beginPath(); ctx.moveTo(cx-shW-20,1480); ctx.lineTo(cx-shW-4,shY+90); ctx.quadraticCurveTo(cx-shW+6,shY+8,cx-shW+90,shY); ctx.lineTo(cx+shW-90,shY); ctx.quadraticCurveTo(cx+shW-6,shY+8,cx+shW+4,shY+90); ctx.lineTo(cx+shW+20,1480); ctx.closePath(); ctx.fill();
+  // soft side shade + fold
+  const g=ctx.createLinearGradient(cx-shW,0,cx+shW,0); g.addColorStop(0,'rgba(0,0,0,.10)'); g.addColorStop(.3,'rgba(0,0,0,0)'); g.addColorStop(.75,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.16)'); ctx.fillStyle=g; ctx.fill();
+  // neck + collar
+  ctx.fillStyle=fc(P.skinD); ctx.fillRect(s.hxp-58,s.hyp+60,116,Math.max(0,shY-s.hyp-50)); ctx.beginPath(); ctx.ellipse(cx,shY+4,62,34,0,0,7); ctx.fill();
+  ctx.strokeStyle=fc(P.shirtD); ctx.lineWidth=12; ctx.beginPath(); ctx.ellipse(cx,shY+4,66,36,0,0.1,Math.PI-.1); ctx.stroke();
+}
+function drawArm(s,side){
+  const sx=s.cx+side*(s.shW-34), sy=s.shY+52; const h=side<0?s.hl:s.hr;
+  const e=ik(sx,sy,h[0],h[1],235,225,side<0?1:-1);
+  ctx.lineCap='round';
+  // forearm (skin), then sleeve over the upper arm
+  ctx.strokeStyle=fc(P.skinD); ctx.lineWidth=60; ctx.beginPath(); ctx.moveTo(e[0],e[1]); ctx.lineTo(h[0],h[1]); ctx.stroke();
+  ctx.strokeStyle=fc(P.skin); ctx.lineWidth=50; ctx.beginPath(); ctx.moveTo(e[0],e[1]); ctx.lineTo(h[0],h[1]); ctx.stroke();
+  const mx=lerp(sx,e[0],.78), my=lerp(sy,e[1],.78);
+  ctx.strokeStyle=fc(P.shirtD); ctx.lineWidth=86; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(mx,my); ctx.stroke();
+  ctx.strokeStyle=fc(P.shirt); ctx.lineWidth=76; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(mx,my); ctx.stroke();
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.arc(e[0],e[1],27,0,7); ctx.fill();
+}
+function drawPhoneBack(s,t){
+  // the back of the phone faces us; its screen lights his face
+  const {px,py}=s; const rot=Math.sin(t*.9)*.015;
+  ctx.save(); ctx.translate(px,py); ctx.rotate(rot);
+  ctx.fillStyle='#14171c'; rr(-78,-150,156,300,30); ctx.fill();
+  ctx.strokeStyle='rgba(170,190,215,.35)'; ctx.lineWidth=3; rr(-78,-150,156,300,30); ctx.stroke();
+  ctx.fillStyle='#22262d'; rr(-62,-134,62,72,18); ctx.fill(); ctx.fillStyle='#0b0c0f'; ctx.beginPath(); ctx.arc(-44,-116,12,0,7); ctx.arc(-44,-82,12,0,7); ctx.fill();
+  ctx.restore();
+  // fingers wrapping the edges
+  ctx.fillStyle=fc(P.skin); for(const sd of [-1,1]) for(let k=0;k<3;k++){ctx.beginPath(); ctx.ellipse(px+sd*70,py-30+k*34,20,15,0,0,7); ctx.fill();}
+}
+function drawHoldHands(s){ctx.fillStyle=fc(P.skin); for(const h of [s.hl,s.hr]){ctx.beginPath(); ctx.arc(h[0],h[1],36,0,7); ctx.fill();}}
+function drawDuaHands(s,t){
+  const a=s.flat; const y=s.py+34; ctx.save(); ctx.globalAlpha=a;
+  // two cupped palms side by side
+  for(const sd of [-1,1]){const x=470+sd*60;
+    ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(x,y+6,74,52,sd*.18,0,Math.PI); ctx.fill();
+    ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.ellipse(x,y,72,46,sd*.18,0,Math.PI); ctx.fill();
+    ctx.strokeStyle=fc(P.skinD); ctx.lineWidth=5; for(let k=0;k<3;k++){ctx.beginPath(); ctx.arc(x+sd*(k*20-16),y+4,16,Math.PI*.15,Math.PI*.85); ctx.stroke();}}
+  // the phone lying in his palms, screen up
+  ctx.fillStyle='#14171c'; rr(470-108,y-26,216,32,12); ctx.fill();
+  const lit=tv('glow',t); ctx.fillStyle=`rgba(150,190,255,${.55*lit})`; rr(470-100,y-26,200,8,4); ctx.fill();
+  ctx.restore();
+}
+function drawWheelHands(s){ctx.fillStyle=fc(P.skin); for(const h of [s.hl,s.hr]){ctx.beginPath(); ctx.ellipse(h[0],h[1],40,32,0,0,7); ctx.fill(); ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(h[0],h[1]+14,38,14,0,0,Math.PI); ctx.fill(); ctx.fillStyle=fc(P.skin);}}
+function drawHead(s,t){
+  const {hxp,hyp,hs,p,turn}=s; ctx.save(); ctx.translate(hxp,hyp); ctx.scale(hs,hs);
+  const fy=p*72, sq=1-Math.max(p,0)*.35, tx=turn*26;
+  // ears
+  ctx.fillStyle=fc(P.skinD); for(const sd of [-1,1]){ctx.beginPath(); ctx.ellipse(sd*148-tx*.3,12+fy*.4,28,38,0,0,7); ctx.fill();}
+  // face
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill();
+  const sg=ctx.createRadialGradient(-50-tx,-50,20,0,0,160); sg.addColorStop(0,'rgba(255,255,255,.08)'); sg.addColorStop(1,'rgba(120,60,30,.18)'); ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.arc(0,0,151,0,7); ctx.clip();
+  // hair: short crop; when he bows we see more of the top of his head
+  const hl=-82+Math.max(p,0)*120;
+  ctx.fillStyle=fc(P.hair); ctx.beginPath(); ctx.moveTo(-160,hl+10); ctx.quadraticCurveTo(-90+tx,hl-26,tx*.6,hl-18); ctx.quadraticCurveTo(90+tx,hl-26,160,hl+10); ctx.lineTo(160,-200); ctx.lineTo(-160,-200); ctx.closePath(); ctx.fill();
+  ctx.fillRect(-160,hl,22,90); ctx.fillRect(138,hl,22,90);
+  const feat=1-ss(.62,.9,p);
+  if(feat>0){ ctx.globalAlpha=feat;
+    const ey=-10+fy, ex=58;
+    // eyes
+    const lid=clamp(Math.max(tv('lid',t),blink(t)));
+    for(const sd of [-1,1]){const x=sd*ex+tx;
+      ctx.fillStyle='#fbf7f2'; ctx.beginPath(); ctx.ellipse(x,ey,30,36*sq,0,0,7); ctx.fill();
+      const lx=tv('lookX',t)*11, ly=tv('lookY',t)*11*sq;
+      ctx.fillStyle='#1c130e'; ctx.beginPath(); ctx.ellipse(x+lx,ey+ly+3,20,23*sq,0,0,7); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(x+lx-7,ey+ly-7,6,0,7); ctx.fill();
+      // upper lid: sad lids droop at the outer corner
+      const sad=tv('brow',t); const top=ey-38*sq, cover=lid*74*sq;
+      ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.moveTo(x-36,top-4); ctx.lineTo(x+36,top-4);
+      ctx.lineTo(x+36,top+cover+sd*sad*7); ctx.quadraticCurveTo(x,top+cover+8*(1-lid),x-36,top+cover-sd*sad*7); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle='#2a1a12'; ctx.lineWidth=5; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(x-30,top+cover-sd*sad*6+2); ctx.quadraticCurveTo(x,top+cover+8*(1-lid)+3,x+30,top+cover+sd*sad*6+2); ctx.stroke();
+      // brows: inner ends lift when sad
+      const by=ey-62*sq-(1-lid)*4; ctx.strokeStyle=fc(P.hair); ctx.lineWidth=15;
+      ctx.beginPath(); ctx.moveTo(x-sd*30,by-sd*0+sad*-10*1); ctx.quadraticCurveTo(x,by-6,x+sd*30,by+sad*8); ctx.stroke();
+    }
+    // nose
+    ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(tx*1.1,32+fy,20,14*sq,0,0,7); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  // beard (wraps the jaw), mustache, mouth
+  const by0=fy*.9;
+  ctx.fillStyle=fc(P.beard); ctx.beginPath(); ctx.moveTo(-152,10+by0*.4); ctx.quadraticCurveTo(-150,150+by0,tx*.5,190+by0); ctx.quadraticCurveTo(150,150+by0,152,10+by0*.4);
+  ctx.lineTo(118,22+by0*.6); ctx.quadraticCurveTo(70+tx,70+by0,tx,72+by0); ctx.quadraticCurveTo(-70+tx,70+by0,-118,22+by0*.6); ctx.closePath(); ctx.fill();
+  if(feat>0){ctx.globalAlpha=feat;
+    ctx.fillStyle=fc(P.beard); ctx.beginPath(); ctx.ellipse(tx,66+fy,58,17*sq,0,0,7); ctx.fill();
+    const sm_=tv('smile',t); ctx.strokeStyle='#8a4434'; ctx.lineWidth=7; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(tx-22-sm_*6,96+fy-sm_*3); ctx.quadraticCurveTo(tx,96+fy+sm_*14-(1-sm_)*3*tv('brow',t),tx+22+sm_*6,96+fy-sm_*3); ctx.stroke();
+    ctx.globalAlpha=1;}
+  ctx.restore();
+  ctx.restore();
+}
+function drawInterior(t,s,W){
+  // ceiling, rear window, seats
+  ctx.fillStyle=fc(mixc(P.ceil,[120,100,84],W*.5)); ctx.fillRect(-200,150,1500,1300);
+  const sk=skyCols(W);
+  const rg=ctx.createLinearGradient(0,400,0,640); rg.addColorStop(0,rgb(mixc(sk.top,sk.bot,.4))); rg.addColorStop(1,rgb(sk.bot)); ctx.fillStyle=rg; rr(200,400,680,240,50); ctx.fill();
+  ctx.fillStyle=rgb(mixc([60,66,74],[150,120,96],W),.6); ctx.fillRect(200,600,680,40);
+  ctx.fillStyle=fc(P.seat); rr(140,610,800,320,70); ctx.fill();
+  // passenger seat (empty)
+  ctx.fillStyle=fc(P.seatH); rr(780,500,190,150,55); ctx.fill(); rr(700,640,420,800,95); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.18)'; rr(760,700,300,700,80); ctx.fill();
+  // driver seat
+  ctx.fillStyle=fc(P.seatH); rr(370,455,200,175,60); ctx.fill(); rr(225,600,490,850,100); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.16)'; rr(285,650,370,800,90); ctx.fill();
+}
+function drawWheelDash(t,W){
+  ctx.lineCap='round';
+  ctx.strokeStyle=fc(P.wheel); ctx.lineWidth=40; ctx.beginPath(); ctx.ellipse(470,1355,268,112,0,Math.PI*1.04,Math.PI*1.96); ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=6; ctx.beginPath(); ctx.ellipse(470,1340,262,108,0,Math.PI*1.12,Math.PI*1.88); ctx.stroke();
+  // dashboard
+  ctx.fillStyle=fc(mixc(P.dash,[70,58,50],W*.6)); ctx.beginPath(); ctx.moveTo(-150,1300); ctx.bezierCurveTo(200,1262,760,1262,1230,1300); ctx.lineTo(1230,1345); ctx.lineTo(-150,1345); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.06)'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(-150,1302); ctx.bezierCurveTo(200,1264,760,1264,1230,1302); ctx.stroke();
+}
+// rain drops on the windshield
+const DROPS=(()=>{const R=rng(186),a=[];for(let i=0;i<190;i++){a.push({x:-60+R()*1220,y:270+R()*1050,r:3+Math.pow(R(),2.2)*13,k:R(),j:R()});}return a;})();
+const RUN=(()=>{const R=rng(42),a=[];for(let i=0;i<9;i++){a.push({x:R()*1080,per:END/(2+Math.floor(R()*3)),ph:R(),r:7+R()*6});}return a;})();
+function drawDrops(t,W,R){
+  const c1=mixc([214,224,236],[255,214,140],W), c2=mixc([24,30,40],[120,70,20],W);
+  for(const d of DROPS){
+    let u=R*1.22-d.k*1.1, a, oy=0;
+    if(t>38){a=clamp(u/.12);} else { if(u<=0) continue; a=clamp(u/.12); oy=Math.pow(1-a,2)*240*(t>20?1:0); a=t>20?Math.min(a,clamp(u/.06)):a; }
+    if(a<=0) continue;
+    const x=d.x, y=d.y+oy, r=d.r*(1+(1-a)*.2*(t>20&&t<38?1:0));
+    ctx.fillStyle=rgb(c1,.20*a); ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill();
+    ctx.strokeStyle=rgb(c2,.32*a); ctx.lineWidth=Math.max(1.4,r*.22); ctx.beginPath(); ctx.arc(x,y,r*.92,Math.PI*.1,Math.PI*.9); ctx.stroke();
+    ctx.fillStyle=rgb([255,255,255],.55*a); ctx.beginPath(); ctx.arc(x-r*.35,y-r*.35,Math.max(1.2,r*.22),0,7); ctx.fill();
+    if(oy>2){ctx.strokeStyle=rgb(c1,.14*a); ctx.lineWidth=r*.7; ctx.beginPath(); ctx.moveTo(x,d.y); ctx.lineTo(x,y); ctx.stroke();}
+  }
+  // a few drops running down the glass (periodic, loop-safe)
+  for(const d of RUN){const u=((t/d.per+d.ph)%1); const y=260+u*1180*Math.pow(u,.6); const a=R*bell(0,1,u)*.9; if(a<=.01) continue;
+    ctx.strokeStyle=rgb(c1,.13*a); ctx.lineWidth=d.r*.8; ctx.beginPath(); ctx.moveTo(d.x+Math.sin(u*9)*4,Math.max(260,y-260)); ctx.lineTo(d.x,y); ctx.stroke();
+    ctx.fillStyle=rgb(c1,.3*a); ctx.beginPath(); ctx.arc(d.x,y,d.r,0,7); ctx.fill(); ctx.fillStyle=`rgba(255,255,255,${.5*a})`; ctx.beginPath(); ctx.arc(d.x-d.r*.3,y-d.r*.3,d.r*.25,0,7); ctx.fill();}
+}
+function drawGlass(t,W,R){
+  // faint sky reflection across the glass
+  const g=ctx.createLinearGradient(0,250,700,1335); const rc=mixc([190,200,214],[255,222,170],W);
+  g.addColorStop(0,rgb(rc,.16)); g.addColorStop(.35,rgb(rc,.05)); g.addColorStop(.55,rgb(rc,0)); g.addColorStop(1,rgb(rc,.03)); ctx.fillStyle=g; wsPath(); ctx.fill();
+  drawDrops(t,W,R);
+  // wipers resting
+  ctx.strokeStyle='#121418'; ctx.lineWidth=12; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(90,1322); ctx.lineTo(560,1286); ctx.stroke(); ctx.beginPath(); ctx.moveTo(600,1322); ctx.lineTo(1060,1286); ctx.stroke();
+}
+// ---------------- the message ----------------
+let IW={};
+function drawBubble(s,t){
+  const a=tv('bub',t); if(a<=.005) return; const n=tv('n',t); const k=Math.floor(n+1e-6), part=n-k;
+  const txt=MSG.slice(0,k); ctx.font='500 50px InterU'; const tw=ctx.measureText(MSG.slice(0,Math.max(k,0))).width;
+  const w=Math.max(250,ctx.measureText(MSG).width+120), h=92; const x=s.px+96, y=s.py-178;
+  ctx.save(); ctx.globalAlpha=a*clamp(tv('glow',t)+.25);
+  ctx.shadowColor='rgba(0,0,0,.35)'; ctx.shadowBlur=24; ctx.shadowOffsetY=8;
+  ctx.fillStyle='#f3f5f8'; rr(x,y,w,h,46); ctx.fill(); ctx.shadowColor='transparent';
+  ctx.fillStyle='#f3f5f8'; ctx.beginPath(); ctx.moveTo(x+30,y+h-6); ctx.lineTo(x-6,y+h+26); ctx.lineTo(x+64,y+h-2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#14171d'; ctx.textBaseline='middle'; ctx.fillText(txt,x+34,y+h/2+2);
+  if(part>0&&k<MSG.length){ctx.globalAlpha=a*part; ctx.fillText(MSG[k],x+34+tw,y+h/2+2); ctx.globalAlpha=a;}
+  const cur=(Math.floor(t*2.2)%2===0)||(Math.abs(n-Math.round(n))>.01);
+  if(cur){ctx.fillStyle='#2f7cf6'; ctx.fillRect(x+36+tw,y+24,4,h-48);}
+  // send button: alive when there is text; it swells a little where his thumb hovers
+  const on=clamp(n); const hov=1+.06*Math.sin(t*5)*on*(t<1.0||t>40.9?1:0);
+  ctx.fillStyle=rgb(mixc([196,204,214],[47,124,246],on)); ctx.beginPath(); ctx.arc(x+w-46,y+h/2,30*hov,0,7); ctx.fill();
+  ctx.strokeStyle='#fff'; ctx.lineWidth=6; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.beginPath(); ctx.moveTo(x+w-46,y+h/2+14); ctx.lineTo(x+w-46,y+h/2-14); ctx.moveTo(x+w-58,y+h/2-2); ctx.lineTo(x+w-46,y+h/2-14); ctx.lineTo(x+w-34,y+h/2-2); ctx.stroke();
+  ctx.restore();
+}
+// the words he could not send rise as light
+function drawRise(s,t){
+  if(t<19.3||t>27.5) return; ctx.save(); ctx.font='500 54px InterU'; ctx.textBaseline='middle'; ctx.textAlign='center';
+  const y0=s.py+4;
+  for(let i=0;i<MSG.length;i++){ if(MSG[i]===' ') continue;
+    const st=19.45+i*.07; const form=ss(st,st+.9,t); if(form<=0) continue;
+    const rise=ss(20.1+i*.04,24.6+i*.07,t); const sp=1+rise*.9;
+    const x=470+(i-5.5)*31*sp+Math.sin(t*1.3+i)*14*rise, y=y0-30-form*40-rise*1350;
+    const fade=1-ss(330,180,y)*0; const out=ss(560,300,y); const a=form*(1-out);
+    if(a<=.01) continue;
+    ctx.globalAlpha=a; ctx.shadowColor='rgba(255,200,110,.95)'; ctx.shadowBlur=26; ctx.fillStyle='#ffe1a0'; ctx.fillText(MSG[i],x,y);
+    ctx.shadowBlur=0; ctx.fillStyle='#fff6e0'; ctx.fillText(MSG[i],x,y);
+  }
+  ctx.restore();
+}
+function hearts(t){let h=0; for(const b of [19.0,19.82,20.64]) h=Math.max(h,Math.exp(-Math.max(0,t-b)*3.2)*(t>=b?1:0)); return h;}
+function drawGoldLight(s,t,c){
+  // a warm point in his palms (the phone in his hands) that grows with the heartbeats
+  const on=ss(18.95,19.3,t)*(1-ss(38.6,40,t)); if(on<=0) return; const W=tv('W',t);
+  const [x,y]=[470,s.py+8]; const r=(120+hearts(t)*90+W*520)*on;
+  ctx.save(); ctx.globalCompositeOperation='screen';
+  const g=ctx.createRadialGradient(x,y,0,x,y,r); g.addColorStop(0,`rgba(255,226,160,${.85*on})`); g.addColorStop(.25,`rgba(255,190,110,${.35*on})`); g.addColorStop(1,'rgba(255,170,90,0)');
+  ctx.fillStyle=g; ctx.fillRect(x-r,y-r,r*2,r*2); ctx.restore();
+}
+function drawBeams(t,W){
+  if(W<=0) return; ctx.save(); ctx.globalCompositeOperation='screen'; wsPath(); ctx.clip();
+  for(let i=0;i<5;i++){const x0=1250+i*90, w=70+i*26, sh=Math.sin(t*.35+i*1.7)*.25+.75;
+    const g=ctx.createLinearGradient(x0,0,x0-900,1500); g.addColorStop(0,`rgba(255,214,150,${.20*W*sh})`); g.addColorStop(1,'rgba(255,214,150,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(x0,0); ctx.lineTo(x0+w,0); ctx.lineTo(x0+w-1100,1500); ctx.lineTo(x0-1100-w*1.6,1500); ctx.closePath(); ctx.fill();}
+  // dust floating in the light
+  const R=rng(9); for(let i=0;i<46;i++){const bx=R()*1100, by=300+R()*1000, sp=.2+R()*.5; const x=bx+Math.sin(t*sp+i)*30, y=by+Math.cos(t*sp*.8+i)*24-((t*6*sp)%60);
+    ctx.fillStyle=`rgba(255,236,200,${.5*W*(.4+.6*R())})`; ctx.beginPath(); ctx.arc(x,y,1.6+R()*2.2,0,7); ctx.fill();}
+  ctx.restore();
+}
+function drawRainFall(t,R){
+  if(R<=.01) return; ctx.setTransform(1,0,0,1,0,0); const Rr=rng(3); const v=2100*47/END;
+  ctx.strokeStyle=`rgba(220,228,238,${.09*R})`; ctx.lineWidth=2;
+  ctx.beginPath(); for(let i=0;i<80;i++){const x=Rr()*1300-120, y0=Rr()*2100, L=50+Rr()*50; const y=((y0+v*t)%2100)-90; ctx.moveTo(x,y); ctx.lineTo(x-L*.18,y+L);} ctx.stroke();
+}
+// ---------------- grade ----------------
+function grade(t,c,s){
+  const W=tv('W',t); ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalCompositeOperation='multiply'; ctx.fillStyle=rgb(mixc([116,130,152],[255,244,228],W)); ctx.fillRect(0,0,W_,H_);
+  ctx.globalCompositeOperation='screen';
+  // the phone's cold light on his face
+  const G=tv('glow',t); if(G>.01){const [fx,fy]=toScr(c,s.hxp,s.hyp+60); const r=520*c.Z; const g=ctx.createRadialGradient(fx,fy,0,fx,fy,r); g.addColorStop(0,`rgba(110,160,240,${.30*G})`); g.addColorStop(1,'rgba(110,160,240,0)'); ctx.fillStyle=g; ctx.fillRect(0,0,W_,H_);}
+  // warm wash
+  if(W>0){const [fx,fy]=toScr(c,470,900); const r=1300*Math.max(c.Z,.6); const g=ctx.createRadialGradient(fx,fy,0,fx,fy,r); g.addColorStop(0,`rgba(255,196,120,${.26*W})`); g.addColorStop(1,`rgba(255,180,110,${.06*W})`); ctx.fillStyle=g; ctx.fillRect(0,0,W_,H_);}
+  ctx.globalCompositeOperation='source-over';
+  // vignette
+  const v=ctx.createRadialGradient(540,900,500,540,960,1350); v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,`rgba(0,0,0,${lerp(.5,.22,W)})`); ctx.fillStyle=v; ctx.fillRect(0,0,W_,H_);
+}
+// ---------------- text ----------------
+const A1=['فَإِنِّي','قَرِيبٌ'], A2='أُجِيبُ دَعْوَةَ الدَّاعِ إِذَا دَعَانِ';
+const E1='Indeed, I am near.', E2a='I respond to the call of the caller', E2b='when he calls upon Me.';
+function drawText(t){
+  ctx.setTransform(1,0,0,1,0,0); const W=tv('W',t); const TXC=505;
+  // a soft warm shade behind the words once the sky turns bright, so they stay readable
+  if(W>0){const sc=ctx.createRadialGradient(TXC,520,40,TXC,520,620); sc.addColorStop(0,`rgba(70,36,12,${.42*W})`); sc.addColorStop(1,'rgba(70,36,12,0)'); ctx.save(); ctx.translate(TXC,520); ctx.scale(1,.55); ctx.translate(-TXC,-520); ctx.fillStyle=sc; ctx.fillRect(TXC-640,-120,1280,1280); ctx.restore();}
+  ctx.save(); ctx.textBaseline='middle'; ctx.direction='rtl'; ctx.textAlign='center';
+  ctx.font='118px AmiriQ'; const w0=ctx.measureText(A1[0]).width, w1=ctx.measureText(A1[1]).width, gap=36, tot=w0+w1+gap;
+  const y1=355; const glowQ=ss(20.2,22,t)*(1-ss(38.6,39.8,t));
+  ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=22; ctx.fillStyle='#fff7ea';
+  ctx.fillText(A1[0],TXC+tot/2-w0/2,y1);
+  // قريب glows gold as the words rise
+  ctx.fillStyle=rgb(mixc([255,247,234],[255,214,140],glowQ)); if(glowQ>0){ctx.shadowColor=`rgba(255,190,100,${.9*glowQ})`; ctx.shadowBlur=22+30*glowQ;}
+  ctx.fillText(A1[1],TXC-tot/2+w1/2,y1);
+  ctx.restore();
+  ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowBlur=16;
+  ctx.font='italic 66px CormI'; ctx.fillStyle='#f8efe0'; ctx.fillText(E1,TXC,468); ctx.restore();
+  // second half writes in right to left after the answer
+  const out=1-ss(38.6,39.6,t); const p2=ss(25.0,27.2,t);
+  if(p2>0&&out>0){ctx.save(); ctx.font='80px AmiriQ'; ctx.direction='rtl'; ctx.textAlign='center'; ctx.textBaseline='middle'; const w=ctx.measureText(A2).width;
+    const xr=TXC+w/2+30, xl=xr-(w+60)*p2; ctx.beginPath(); ctx.rect(xl,500,xr-xl+40,160); ctx.clip();
+    ctx.globalAlpha=out; ctx.shadowColor='rgba(50,22,0,.8)'; ctx.shadowBlur=20; ctx.fillStyle='#fff6e4'; ctx.fillText(A2,TXC,575); ctx.restore();}
+  const e2=ss(27.0,28.6,t)*out, e3=ss(27.6,29.2,t)*out;
+  if(e2>0){ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='italic 52px CormI'; ctx.shadowColor='rgba(50,22,0,.85)'; ctx.shadowBlur=16; ctx.fillStyle='#fff6ea';
+    ctx.globalAlpha=e2; ctx.fillText(E2a,TXC,662); ctx.globalAlpha=e3; ctx.fillText(E2b,TXC,716); ctx.restore();}
+  const rf=ss(29.6,30.6,t)*out; if(rf>0){ctx.save(); ctx.textAlign='center'; ctx.font='30px Corm'; ctx.letterSpacing='7px'; ctx.fillStyle=`rgba(255,240,215,${.8*rf})`; ctx.shadowColor='rgba(60,30,0,.6)'; ctx.shadowBlur=10; ctx.fillText('AL-BAQARAH 2:186',TXC,1440); ctx.restore();}
+  const wm=ss(31,32,t)*out; if(wm>0){ctx.save(); ctx.textAlign='center'; ctx.font='28px Corm'; ctx.letterSpacing='10px'; ctx.fillStyle=`rgba(255,240,215,${.55*wm})`; ctx.fillText('AYAH STUDIO',TXC,1488); ctx.restore();}
+  if(window.SAFE){ctx.strokeStyle='rgba(255,0,0,.8)'; ctx.lineWidth=3; ctx.strokeRect(0,270,940,980);}
+}
+// ---------------- frame ----------------
+function draw(tr){
+  const t=((tr%END)+END)%END;
+  ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over'; ctx.filter='none'; ctx.shadowColor='transparent';
+  const c=cam(t), W=tv('W',t), R=tv('R',t), s=pose(t);
+  drawSky(t,W);
+  drawWorld(t,c,W,R);
+  setCam(c); drawCarBody(t,W);
+  ctx.save(); wsPath(); ctx.clip();
+  drawInterior(t,s,W);
+  drawTorso(s);
+  if(s.py>1240) {drawPhoneBack(s,t);}
+  drawWheelDash(t,W);
+  if(s.wh>.5){drawArm(s,-1); drawArm(s,1); drawWheelHands(s); drawHead(s,t);}
+  else {drawArm(s,-1); drawArm(s,1);
+    if(s.flat<.99&&s.py<=1240){ctx.save(); ctx.globalAlpha=1-s.flat; drawPhoneBack(s,t); ctx.restore();}
+    if(s.flat>.01) drawDuaHands(s,t);
+    if(s.flat<.5) {ctx.save(); ctx.globalAlpha=1-s.flat*2; drawHoldHands(s); ctx.restore();}
+    drawHead(s,t);}
+  // the dash covers whatever has slipped below it
+  if(s.py>1240){ctx.fillStyle=fc(mixc(P.dash,[70,58,50],W*.6)); ctx.fillRect(-150,1320,1400,30);}
+  ctx.restore();
+  ctx.save(); wsPath(); ctx.clip(); drawGlass(t,W,R); ctx.restore();
+  drawBeams(t,W);
+  grade(t,c,s);
+  setCam(c); drawGoldLight(s,t,c); drawBubble(s,t); drawRise(s,t);
+  drawRainFall(t,R);
+  drawText(t);
+}
+function events(){
+  const ev=[]; let prev=tv('n',0);
+  for(let i=1;i<=END*1000;i++){const t=i/1000; const n=Math.floor(tv('n',t)+1e-6); const pn=Math.floor(prev+1e-6); if(n!==pn) ev.push({type:n>pn?'key':'del',t}); prev=tv('n',t);}
+  const cur={type:'curves',dt:.05,R:[],W:[]}; for(let t=0;t<=END+1e-6;t+=.05){cur.R.push(+tv('R',t).toFixed(4)); cur.W.push(+tv('W',t).toFixed(4));} ev.push(cur);
+  return ev;
+}
+window.draw=draw; window.events=events; window.REAL_END=()=>END; window.tv=tv;
+window.ready=(async()=>{await document.fonts.load('118px AmiriQ'); await document.fonts.load('italic 66px CormI'); await document.fonts.load('30px Corm'); await document.fonts.load('500 46px InterU'); return true;})();
+</script></body></html>
