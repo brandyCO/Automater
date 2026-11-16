@@ -1,0 +1,57 @@
+# Batch 3 Bismillah / openings check for Ayah Studio (moved here 2026-11-16 so it runs on a public repo).
+# Same steps as ayah-studio's align.yml "openings" job; results go to the branch ayah-openings-results.
+name: Ayah openings
+on:
+  push:
+    branches: [ayah-openings]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  openings:
+    name: Openings · ${{ matrix.key }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        key: ["saleh-quraishi", "saleh-shamrani", "faisal-hajri", "anas-emadi", "zaki-daghistani", "sami-dosari", "sayed-ramadan", "shaban-sayyad", "shirzad-taher", "saber-abdulhakam", "abubakr-shatri", "saleh-sahood", "saleh-talib", "saleh-habdan", "salah-hashim", "mukhtar-haj", "adel-rayyan", "ahmad-hawashi", "abdulrasheed-sufi-r3", "abdulmohsen-harthi", "abdulmohsen-obaikan", "ahmad-saud", "abdulwadood-haneef", "abdulwali-arkani", "ali-souissi", "imad-hafez", "ahmad-saber", "fahad-kandari", "fawaz-kaabi", "lafi-oni", "nabil-rifai", "neama-hassan", "hani-rifai"]
+    env:
+      ALIGN_MODEL: ${{ github.workspace }}/.cache/align-model
+      KEY: ${{ matrix.key }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ffmpeg and the model's libraries
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+          pip install -q --index-url https://download.pytorch.org/whl/cpu torch==2.11.0 torchaudio==2.11.0
+          pip install -q transformers==5.19.0 numpy huggingface_hub
+      - uses: actions/cache@v4
+        with:
+          path: .cache/align-model
+          key: align-model-rabah2026-v_final
+      - name: Download the model (Apache-2.0)
+        run: |
+          [ -f "$ALIGN_MODEL/model.safetensors" ] || python3 -c "from huggingface_hub import snapshot_download as d; d('rabah2026/wav2vec2-large-xlsr-53-arabic-quran-v_final', local_dir='$ALIGN_MODEL')"
+      - run: mkdir -p openings && rm -f public/data/basmala.json && python3 scripts/fix-openings.py "$GITHUB_WORKSPACE" "$KEY"
+      - name: Save results
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/out/openings/$KEY"
+          cp public/data/basmala.json "$RUNNER_TEMP/out/openings/$KEY/basmala.json" 2>/dev/null || exit 0
+          git diff --name-only -- "public/data/words/$KEY" | while read f; do cp "$f" "$RUNNER_TEMP/out/openings/$KEY/"; done
+          ls public/data/words/$KEY 2>/dev/null | head -0
+          for f in $(git ls-files --others --exclude-standard -- "public/data/words/$KEY"); do cp "$f" "$RUNNER_TEMP/out/openings/$KEY/"; done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5 6 7 8; do
+            rm -rf "$RUNNER_TEMP/r" && git clone -q --depth 1 --branch ayah-openings-results "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$RUNNER_TEMP/r" || exit 1
+            cp -r "$RUNNER_TEMP/out/openings" "$RUNNER_TEMP/r/"
+            git -C "$RUNNER_TEMP/r" add openings && git -C "$RUNNER_TEMP/r" commit -qm "Openings: $KEY" && git -C "$RUNNER_TEMP/r" push -q origin HEAD:ayah-openings-results && exit 0
+            sleep $((RANDOM % 20 + 5))
+          done
+          exit 1
