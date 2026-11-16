@@ -5,7 +5,7 @@ set -e
 JOB=$1; DEST=$2; REPO=brandyCO/automater; [ -n "$JOB" ] && [ -n "$DEST" ] || { sed -n 2,3p "$0"; exit 1; }
 SUB=$(grep -s SUBMITTED "$(dirname "$0")/../render-jobs/$JOB/job.env" | cut -d= -f2); SUB=${SUB:-1970-01-01T00:00:00Z}
 for i in $(seq 1 120); do
-  TAG=$(gh api "repos/$REPO/releases?per_page=30" --jq "[.[]|select(.tag_name|startswith(\"render-$JOB-\") and .created_at > \"$SUB\")][0].tag_name" 2>/dev/null)
+  TAG=$(gh api "repos/$REPO/releases?per_page=30" --jq "[.[]|select((.tag_name|startswith(\"render-$JOB-\")) and .published_at > \"$SUB\")][0].tag_name" 2>/dev/null)
   [ -n "$TAG" ] && [ "$TAG" != null ] && break
   RUN=$(gh api "repos/$REPO/actions/workflows/render.yml/runs?per_page=1" --jq '.workflow_runs[0]|"\(.status) \(.conclusion)"' 2>/dev/null)
   case "$RUN" in "completed failure"*|"completed cancelled"*) echo "render run failed: $RUN"; exit 1;; esac
