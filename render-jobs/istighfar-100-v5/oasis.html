@@ -327,7 +327,7 @@ function drawDrops(S){const t=S.t;const gold=ss(0.9,1,S.P)*0.5+S.B*0.5;const c=m
 
 // ---------- text and the tasbih counter
 const AR1='أَسْتَغْفِرُ اللَّهَ',EN1="I seek Allah's forgiveness";
-const AR2='اسْتَغْفِرُوا رَبَّكُمْ إِنَّهُ كَانَ غَفَّارًا',EN2a='Ask forgiveness of your Lord.',EN2b='Indeed, He is ever a Perpetual Forgiver.',REF2='NUH 71:10';
+const AR2='فَقُلْتُ اسْتَغْفِرُوا رَبَّكُمْ إِنَّهُ كَانَ غَفَّارًا',EN2a='And said, "Ask forgiveness of your Lord.',EN2b='Indeed, He is ever a Perpetual Forgiver."',REF2='NUH 71:10';
 function txt(s,x,y,font,col,a,blur=12,ls='0px'){if(a<=0.003)return;ctx.save();ctx.font=font;ctx.letterSpacing=ls;ctx.textAlign='center';ctx.fillStyle=col;ctx.globalAlpha=a;ctx.shadowColor='rgba(0,0,0,0.6)';ctx.shadowBlur=blur;ctx.fillText(s,x,y);ctx.restore();}
 // the counter: a real tasbih, 33 beads in a ring, three rounds, and the 100th is the long imam bead below
 const TCX=FX,TCY=612,TRAD=80,TBR=7;
@@ -382,7 +382,7 @@ function drawUI(S){const {t,P,k,B}=S;
     if(t>=T100){const age=(t-T100)/1.6;if(age<1){ctx.save();ctx.globalCompositeOperation='lighter';const rg=ctx.createRadialGradient(FX,580,10,FX,580,420);rg.addColorStop(0,`rgba(255,232,180,${0.35*(1-age)})`);rg.addColorStop(1,'rgba(255,232,180,0)');ctx.fillStyle=rg;ctx.fillRect(FX-420,160,840,840);ctx.restore();}}
   }
   const a2=ss(TXT,TXT+1.4,t)*(1-ss(TLOOP-0.1,TLOOP+0.8,t));
-  if(a2>0){txt(AR2,FX,420,'82px AmiriQ','#fff6e6',a2,14);txt(EN2a,FX,530,'italic 46px CormI','#fffaf2',a2,12);txt(EN2b,FX,586,'italic 46px CormI','#fffaf2',a2,12);txt(REF2,FX,650,'500 24px Cinzel','#fff3dc',0.9*a2,10,'6px');txt('AYAH STUDIO',FX,1300,'500 24px Cinzel','rgba(255,248,232,1)',0.5*a2,8,'9px');}
+  if(a2>0){txt(AR2,FX,420,'70px AmiriQ','#fff6e6',a2,14);txt(EN2a,FX,530,'italic 46px CormI','#fffaf2',a2,12);txt(EN2b,FX,586,'italic 46px CormI','#fffaf2',a2,12);txt(REF2,FX,650,'500 24px Cinzel','#fff3dc',0.9*a2,10,'6px');txt('AYAH STUDIO',FX,1300,'500 24px Cinzel','rgba(255,248,232,1)',0.5*a2,8,'9px');}
 }
 function frame(S){drawScene(S);drawPipe(S);drawDrops(S);}
 function draw(t){const S=state(t);
