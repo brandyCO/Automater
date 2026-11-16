@@ -16,7 +16,7 @@ for f in "$KIT"/*; do case "$(basename "$f")" in out|frames|stills|*.mp4|*.png) 
 cp "$SND" "$D/sound.wav"; [ -n "$FIN" ] && cp "$FIN" "$D/finish.sh"
 printf 'NAME=%s\nFRAMES=%s\nSLICES=%s\nSUBMITTED=%s\n' "$NAME" "$FRAMES" "$SLICES" "$(date -u +%FT%TZ)" > "$D/job.env"
 cd "$R"; git pull -q --rebase || true; git add "render-jobs/$JOB"
-git -c user.name="Claude" -c user.email="noreply@anthropic.com" commit -qm "Render job $JOB ($FRAMES frames)"
+git -c user.name="Claude" -c user.email="noreply@anthropic.com" commit -qm "Render job $JOB ($FRAMES frames)" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 for i in 1 2 3 4; do git -c push.negotiate=true push -q origin main && break; sleep $((i*4)); done
 echo "submitted job $JOB. Watch: https://github.com/brandyCO/automater/actions/workflows/render.yml"
 echo "When done: bash tools/fetch.sh $JOB DEST_DIR"
