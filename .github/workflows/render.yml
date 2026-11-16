@@ -1,0 +1,130 @@
+# Render a wordless reel on GitHub's free runners.
+# A job folder render-jobs/<job>/ holds the render kit (run.sh, render.js, html/js, fonts),
+# sound.wav (the final, loudness-normalised soundtrack) and job.env (NAME=..., FRAMES=..., optional SLICES=...).
+# Pushing a changed job.env starts this workflow; it can also be started by hand (Actions tab -> Render reel -> Run).
+# Output: a public release "render-<job>-<run>" with <NAME>.mp4 (60 fps master), <NAME>_pc.mp4 and <NAME>_phone.mp4.
+name: Render reel
+
+on:
+  push:
+    branches: [main]
+    paths: ['render-jobs/*/job.env']
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Folder name under render-jobs/'
+        required: true
+      slices:
+        description: 'How many machines to split the frames across (max 20)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      job: ${{ steps.p.outputs.job }}
+      name: ${{ steps.p.outputs.name }}
+      frames: ${{ steps.p.outputs.frames }}
+      matrix: ${{ steps.p.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: p
+        run: |
+          set -e
+          JOB="${{ github.event.inputs.job }}"
+          if [ -z "$JOB" ]; then
+            JOB=$(git diff --name-only HEAD~1 HEAD -- 'render-jobs/*/job.env' | head -1 | cut -d/ -f2)
+          fi
+          [ -n "$JOB" ] && [ -f "render-jobs/$JOB/job.env" ] || { echo "no job found"; exit 1; }
+          source "render-jobs/$JOB/job.env"
+          S="${{ github.event.inputs.slices }}"; S=${S:-${SLICES:-20}}; [ "$S" -gt 20 ] && S=20
+          M=$(python3 -c "
+          import json; f=$FRAMES; s=$S; step=-(-f//s)
+          print(json.dumps({'include':[{'a':a,'b':min(f,a+step)} for a in range(0,f,step)]}))")
+          echo "job=$JOB" >> $GITHUB_OUTPUT; echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "frames=$FRAMES" >> $GITHUB_OUTPUT; echo "matrix=$M" >> $GITHUB_OUTPUT
+          echo "Job $JOB ($NAME): $FRAMES frames across $S machines"
+
+  render:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: render-jobs/${{ needs.plan.outputs.job }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install renderer
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          mkdir -p ~/pw && cd ~/pw && npm init -y > /dev/null && npm i -s playwright@1.63.0
+          npx playwright install --with-deps chromium > /dev/null
+      - name: Render frames ${{ matrix.a }}-${{ matrix.b }}
+        run: |
+          K=render-jobs/${{ needs.plan.outputs.job }}
+          mkdir -p $K/out
+          NODE_PATH=~/pw/node_modules bash $K/run.sh ${{ matrix.a }} ${{ matrix.b }}
+          ls -la $K/out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seg_${{ matrix.a }}
+          path: render-jobs/${{ needs.plan.outputs.job }}/out/seg_${{ matrix.a }}_${{ matrix.b }}.mp4
+          retention-days: 3
+          compression-level: 0
+
+  finish:
+    needs: [plan, render]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: render-jobs/${{ needs.plan.outputs.job }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: seg_*
+          path: segs
+          merge-multiple: true
+      - name: Join slices and encode master, PC and phone copies
+        env:
+          JOB: ${{ needs.plan.outputs.job }}
+          NAME: ${{ needs.plan.outputs.name }}
+        run: |
+          set -e
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          K=$PWD/render-jobs/$JOB; mkdir -p final; cd final
+          if [ -f "$K/finish.sh" ]; then bash "$K/finish.sh" "$PWD/../segs" "$NAME"; else
+            SEGS=$(ls ../segs/seg_*.mp4 | sort -t_ -k2 -n)
+            IN=""; FC=""; CAT=""; i=0
+            for s in $SEGS; do IN="$IN -i $s"; FC="$FC[$i:v]setsar=1[s$i];"; CAT="$CAT[s$i]"; i=$((i+1)); done
+            echo "joining $i slices"
+            ffmpeg -hide_banner -loglevel error -y $IN -i "$K/sound.wav" \
+              -filter_complex "${FC}${CAT}concat=n=$i:v=1:a=0,noise=alls=3:allf=t,format=yuv420p[v]" \
+              -map "[v]" -map $i:a -c:v libx264 -preset medium -b:v 12M -maxrate 14M -bufsize 24M -r 60 \
+              -c:a aac -b:a 192k -movflags +faststart -shortest "$NAME.mp4"
+            ffmpeg -hide_banner -loglevel error -y -i "$NAME.mp4" -c:v libx264 -preset slow -b:v 2.0M -maxrate 2.8M -bufsize 5M -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart "${NAME}_pc.mp4" &
+            ffmpeg -hide_banner -loglevel error -y -i "$NAME.mp4" -vf fps=30 -c:v libx264 -preset slow -tune grain -b:v 1.65M -pass 1 -passlogfile ph -an -f mp4 /dev/null && \
+            ffmpeg -hide_banner -loglevel error -y -i "$NAME.mp4" -vf fps=30 -c:v libx264 -preset slow -tune grain -b:v 1.65M -pass 2 -passlogfile ph -pix_fmt yuv420p -c:a aac -b:a 112k -movflags +faststart "${NAME}_phone.mp4"
+            wait
+          fi
+          ls -la
+          ffprobe -v error -show_entries format=duration:stream=width,height,r_frame_rate -of compact "$NAME.mp4"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB: ${{ needs.plan.outputs.job }}
+          NAME: ${{ needs.plan.outputs.name }}
+        run: |
+          TAG="render-$JOB-${{ github.run_number }}"
+          gh release create "$TAG" final/*.mp4 --repo "${{ github.repository }}" --title "$NAME (run ${{ github.run_number }})" \
+            --notes "Rendered from render-jobs/$JOB on ${{ needs.plan.outputs.frames }} frames. Download: https://github.com/${{ github.repository }}/releases/download/$TAG/$NAME.mp4"
