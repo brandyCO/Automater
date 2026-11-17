@@ -1,0 +1,530 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:'AmiriQ';src:url(amiri.woff2) format('woff2');}
+@font-face{font-family:'Corm';src:url(corm.woff2) format('woff2');}
+@font-face{font-family:'CormI';src:url(cormi.woff2) format('woff2');}
+html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}
+</style></head><body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// Fine (12:86). The lift mirror: the camera is the mirror, he faces us. One continuous take, deterministic draw(t), loops at END.
+const cv=document.getElementById('c'), mctx=cv.getContext('2d'); let ctx=mctx;
+const fcv=document.createElement('canvas'); fcv.width=1080; fcv.height=1920; const fctx=fcv.getContext('2d');
+const END=40.0, W_=1080, H_=1920;
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const lerp=(a,b,u)=>a+(b-a)*u;
+const sm=u=>{u=clamp(u);return u*u*u*(u*(u*6-15)+10);};
+const inv=(a,b,t)=>clamp((t-a)/(b-a));
+const ss=(a,b,t)=>sm(inv(a,b,t));
+const bell=(a,b,t)=>{const m=(a+b)/2;return ss(a,m,t)*(1-ss(m,b,t));};
+const EZ={io:sm, lin:u=>u, o:u=>1-Math.pow(1-u,3), i:u=>u*u*u, o2:u=>Math.sin(u*Math.PI/2)};
+function K(keys,t){
+  if(t<=keys[0][0]) return keys[0][1];
+  for(let i=0;i<keys.length-1;i++){const a=keys[i],b=keys[i+1]; if(t<=b[0]){const u=(t-a[0])/(b[0]-a[0]); return lerp(a[1],b[1],(EZ[b[2]||'io'])(u));}}
+  return keys[keys.length-1][1];
+}
+function KL(keys,t){return Math.exp(K(keys.map(k=>[k[0],Math.log(k[1]),k[2]]),t));}
+const mixc=(a,b,u)=>[lerp(a[0],b[0],u),lerp(a[1],b[1],u),lerp(a[2],b[2],u)];
+const rgb=(c,a=1)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const hx=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+function rng(seed){let s=seed>>>0;return()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296;};}
+const wrap=t=>((t%END)+END)%END;
+
+// ---------------- timeline ----------------
+const TR={
+ lean:[[0,0],[1.2,0],[1.45,.12],[2.6,.1],[3.4,.04],[4.85,.05],[5.0,.08],[5.45,.82],[5.62,.78],[7.4,.8],[8.7,.36],[10.9,.34],[11.6,.06],[12.8,.1],[14.6,.12],[15.8,.1],[17.3,.1],[18.4,.24],[20.4,.24],[22.4,.1],[24.2,0],[40,0]],
+ pitch:[[0,.04],[1.2,.04],[1.45,.35],[2.6,.3],[3.4,.06],[5.0,.08],[5.45,1],[7.4,1],[8.7,.45],[10.8,.42],[11.5,.08],[12.8,.14],[14.6,.14],[14.9,-.22],[15.6,-.22],[16.0,.08],[17.3,.12],[18.4,.52],[20.4,.55],[22.4,.15],[24.2,-.04],[37.6,-.04],[39.4,.04],[40,.04]],
+ turn:[[0,0],[14.6,0],[14.95,.32],[15.6,.32],[16.0,0],[40,0]],
+ slump:[[0,0],[1.2,0],[1.5,.5],[2.6,.45],[3.6,.18],[5.0,.2],[5.5,.62],[7.6,.62],[8.7,.5],[11.2,.42],[11.8,.24],[12.6,.34],[14.6,.45],[17.3,.5],[18.4,.56],[20.4,.56],[23.0,.08],[25.5,-.1],[37.6,-.1],[39.6,0],[40,0]],
+ S:[[0,.85],[1.2,.85],[1.42,-.35],[2.8,-.35],[3.2,-.2],[3.9,.68],[5.0,.66],[5.22,-.55],[7.6,-.6],[10.6,-.5],[11.4,-.4],[12.0,.5],[12.4,.46],[12.75,-.3],[13.4,-.32],[13.8,.36],[14.3,.34],[14.6,-.36],[15.8,-.4],[16.4,.12],[17.1,.1],[17.6,-.45],[20.4,-.4],[22.0,-.05],[24.0,.6],[37.6,.6],[38.7,.3],[39.5,.85],[40,.85]],
+ teeth:[[0,1],[1.2,1],[1.36,0],[3.3,0],[3.9,.75],[5.0,.75],[5.18,0],[11.6,0],[12.0,.5],[12.45,.45],[12.7,0],[13.6,0],[13.9,.32],[14.35,.3],[14.6,0],[16.3,0],[16.6,.1],[17.1,.08],[17.4,0],[38.9,0],[39.6,1],[40,1]],
+ eyeS:[[0,0],[21.8,0],[24.2,.62],[37.6,.62],[38.9,0],[40,0]],
+ trem:[[0,0],[4.95,0],[5.12,1],[5.7,.6],[7.6,.45],[8.7,.2],[12.4,0],[12.55,.8],[13.0,.2],[14.4,0],[14.55,.6],[15.3,.2],[16.6,.3],[17.2,.65],[17.7,.3],[18.5,0],[40,0]],
+ lid:[[0,.28],[1.2,.28],[1.45,.5],[2.6,.48],[3.6,.3],[5.0,.32],[5.4,.9],[7.6,.9],[8.7,.55],[11.4,.42],[14.6,.45],[14.9,.2],[15.6,.22],[16.0,.45],[17.3,.55],[17.9,1.0],[20.6,1.0],[22.0,.7],[23.6,.4],[37.6,.4],[39.0,.3],[40,.28]],
+ brow:[[0,.7],[1.2,.7],[1.4,1],[3.6,.8],[5.0,.82],[5.3,1],[17.4,1],[20.4,.9],[22.2,.3],[24.2,0],[37.6,0],[39.4,.7],[40,.7]],
+ wet:[[0,.25],[1.2,.25],[1.6,.5],[5.0,.55],[5.6,.8],[17.0,1],[19.0,.9],[24,.3],[37.6,.3],[40,.25]],
+ lookX:[[0,0],[14.6,0],[14.9,.85],[15.6,.85],[16.0,0],[40,0]],
+ lookY:[[0,0],[1.2,0],[1.45,.7],[2.8,.6],[3.6,0],[5.0,0],[5.4,.9],[10.6,.8],[11.4,.05],[14.6,.05],[14.9,-.35],[15.6,-.35],[16.0,0],[17.3,.15],[17.9,.6],[22.0,.4],[23.6,0],[40,0]],
+ talk:[[0,0],[17.7,0],[18.0,1],[18.9,1],[19.2,0],[40,0]],
+ W:[[0,0],[19.4,0],[31,1,'o2'],[37.6,1],[39.8,0],[40,0]],
+ door:[[0,0],[23.3,0],[25.6,1],[37.4,1],[38.9,0],[40,0]],
+ Z:[[0,1],[7.9,1.02],[9.7,.52],[10.8,.52],[12.0,.98],[15.0,1.0],[17.6,1.12],[19.6,1.2],[21.6,1.16],[24.0,1.06],[25.4,1.04],[31,.74],[37.6,.74],[39.8,1],[40,1]],
+ CX:[[0,505],[7.9,505],[9.7,520],[10.8,520],[12.0,505],[40,505]],
+ CY:[[0,920],[7.9,925],[9.7,1250],[10.8,1250],[12.0,925],[15.0,925],[17.6,935],[19.6,945],[21.6,940],[24.0,925],[25.4,925],[31,600],[37.6,600],[39.8,920],[40,920]],
+};
+const tv=(k,t)=>K(TR[k],t);
+const HITS=[[1.2,40],[5.0,78]];
+function hitOff(t){let d=0;for(const[h,a]of HITS){const x=t-h;if(x<0)continue;d+=x<.1?a*sm(x/.1):a*Math.exp(-(x-.1)*3.2)*Math.cos((x-.1)*5.2);}return d;}
+function blink(t){let b=0;for(const bt of [2.3,3.5,11.3,16.1,28.5,33.8]){b=Math.max(b,bell(bt,bt+.2,t));}return b;}
+// loop-safe breathing: whole numbers of breaths per loop, slow breaths blend in with the light
+function breath(t){const W=tv('W',t);return lerp(Math.sin(2*Math.PI*11*t/END),Math.sin(2*Math.PI*8*t/END),W);}
+
+// hand poses: positions are computed live from the body
+const HP=[[0,'collar'],[1.2,'collar'],[1.62,'side'],[2.6,'side'],[3.3,'collar'],[5.0,'collar'],[5.45,'rail'],[10.9,'rail'],[11.6,'collar'],[12.6,'collar'],[13.0,'side'],[13.3,'side'],[13.75,'cheek'],[14.35,'cheek'],[14.75,'side'],[17.3,'side'],[18.3,'dua'],[24.6,'dua'],[26.4,'side'],[38.6,'side'],[39.5,'collar'],[40,'collar']];
+
+// ---------------- the lift: physics ----------------
+// lift speed (floors per second, normalised): steady climb, eases to a stop at the top, starts again at the loop
+function liftV(t){return 1-ss(20.6,22.3,t)+ss(39.0,40.0,t);}
+// acceleration felt in the cabin (px/s^2, positive = cabin pushed up): the jolt at hit 1, the stop, the start
+function liftA(t){
+  t=wrap(t); let a=0;
+  const j=t-1.2; a+= 5200*Math.exp(-j*j/(2*.035*.035))*(j/.035)*-1;      // a short bump as it passes a floor
+  a+= -900*bell(20.6,22.3,t);                                            // braking (feels lighter)
+  a+= 900*bell(39.0,40.0,t);                                             // starting (feels heavier)
+  return a;
+}
+// a damped spring for his knees/body and a pendulum for the tie, integrated from rest 6 s back (loop-safe, deterministic)
+const SIMC=new Map();
+function sim(t){
+  const key=Math.round(t*960); if(SIMC.has(key)) return SIMC.get(key);
+  const dt=1/480; let y=0,vy=0, th=0,vth=0; const w1=2*Math.PI*1.5, z1=.32, w2=2*Math.PI*1.1, z2=.12;
+  let pcx=null, pv=0;
+  for(let s=t-6; s<=t+1e-9; s+=dt){
+    const a=liftA(s); vy+=(-w1*w1*y-2*z1*w1*vy+a*.012)*dt; y+=vy*dt;
+    // tie driven by sideways chest acceleration and by the chest tipping (asymmetric bow)
+    const cx=chestX(s), pit=wrap(s); const ax=(pcx===null?0:((cx-pcx)/dt-pv)/dt); pv=(pcx===null?0:(cx-pcx)/dt); pcx=cx;
+    vth+=(-w2*w2*th-2*z2*w2*vth-ax*.0012+dLean(s)*6.4)*dt; th+=vth*dt;
+  }
+  const r={bob:y, tie:clamp(th,-.5,.5)}; if(SIMC.size>20000) SIMC.clear(); SIMC.set(key,r); return r;
+}
+function chestX(s){s=wrap(s); return tv('turn',s)*8+Math.sin(s*2*Math.PI*4/END)*1.5;}
+function dLean(s){s=wrap(s); const e=.01; return ((tv('lean',s+e)-tv('lean',s-e))/(2*e))*Math.sin(1.3)*.25+((tv('slump',s+e)-tv('slump',s-e))/(2*e))*.15;}
+
+// ---------------- camera ----------------
+function cam(t){
+  const Z=KL(TR.Z,t), W=tv('W',t);
+  let CX=tv('CX',t), CY=tv('CY',t);
+  const drift=(1-W)*(1-ss(17.2,18.2,t)*(1-ss(20.6,21.4,t)));
+  const q=2*Math.PI/END; CX+= (2.0*Math.sin(t*q*4)+1.2*Math.sin(t*q*9+1))*drift/Z;
+  CY+= (1.6*Math.sin(t*q*3+2)+1.0*Math.sin(t*q*7))*drift/Z;
+  CY-= hitOff(t)/Z;
+  return {Z,CX,CY};
+}
+function setCam(c){ctx.setTransform(c.Z,0,0,c.Z,540-c.CX*c.Z,960-c.CY*c.Z);}
+const toScr=(c,x,y)=>[540+(x-c.CX)*c.Z,960+(y-c.CY)*c.Z];
+
+// ---------------- palette ----------------
+const P={skin:hx('#e3a87b'),skinD:hx('#c98b60'),hair:hx('#221710'),beard:hx('#2a1b13'),shirt:hx('#a9b6c4'),shirtD:hx('#77859a'),tie:hx('#2b3a55'),tieD:hx('#1e2a40'),
+ pants:hx('#3a3f48'),pantsD:hx('#2c3038'),shoe:hx('#1a1612')};
+const fc=(c,a=1)=>rgb(c,a);
+
+// ---------------- the cabin (one-point perspective box; far wall = the doors) ----------------
+const NB={x0:-1300,x1:2240,y0:-1500,y1:3900}, FB={x0:-150,x1:1090,y0:150,y1:2200};
+const DOOR={x0:215,x1:725,y0:470,y1:2200};
+function quad(a,b,c,d){ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.lineTo(c[0],c[1]); ctx.lineTo(d[0],d[1]); ctx.closePath();}
+function drawCabin(t,c,W){
+  setCam(c);
+  const D=tv('door',t);
+  const steel=mixc([104,112,124],[176,150,124],W*.8), steelD=mixc([74,80,92],[134,110,92],W*.8);
+  // ceiling
+  ctx.fillStyle=rgb(mixc([62,66,74],[120,100,86],W*.7)); quad([NB.x0,NB.y0],[NB.x1,NB.y0],[FB.x1,FB.y0],[FB.x0,FB.y0]); ctx.fill();
+  // the ceiling light panel (cool, steady)
+  const lp_=mixc([214,226,240],[255,236,206],W*.6);
+  ctx.fillStyle=rgb(lp_,.9); quad([90,-300],[850,-300],[760,40],[180,40]); ctx.fill();
+  const lg=ctx.createRadialGradient(470,-120,0,470,-120,900); lg.addColorStop(0,rgb(lp_,.22)); lg.addColorStop(1,rgb(lp_,0)); ctx.fillStyle=lg; ctx.fillRect(-500,-600,1940,1400);
+  // side walls: brushed steel panels with vertical seams
+  for(const side of [-1,1]){
+    const nx=side<0?NB.x0:NB.x1, fx=side<0?FB.x0:FB.x1;
+    const wood=mixc([96,72,58],[170,124,90],W*.8), woodD=mixc([58,44,38],[120,86,64],W*.8);
+    const g=ctx.createLinearGradient(nx,0,fx,0); g.addColorStop(0,rgb(woodD)); g.addColorStop(1,rgb(wood)); ctx.fillStyle=g;
+    quad([nx,NB.y0],[fx,FB.y0],[fx,FB.y1],[nx,NB.y1]); ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.18)'; ctx.lineWidth=5;
+    for(const u of [.33,.66]){const x=lerp(nx,fx,u), y0=lerp(NB.y0,FB.y0,u), y1=lerp(NB.y1,FB.y1,u); ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke();}
+    // side handrail
+    ctx.strokeStyle=rgb(mixc([150,158,170],[230,206,170],W*.8),.8); ctx.lineWidth=18; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(lerp(nx,fx,.08),lerp(1820,1430,.08)); ctx.lineTo(lerp(nx,fx,.92),lerp(1820,1430,.92)); ctx.stroke();
+  }
+  // floor
+  const fg=ctx.createLinearGradient(0,FB.y1,0,NB.y1); fg.addColorStop(0,rgb(mixc([66,68,74],[150,120,96],W*.7))); fg.addColorStop(1,rgb(mixc([40,42,48],[96,76,62],W*.7)));
+  ctx.fillStyle=fg; quad([FB.x0,FB.y1],[FB.x1,FB.y1],[NB.x1,NB.y1],[NB.x0,NB.y1]); ctx.fill();
+  // far wall
+  const wg=ctx.createLinearGradient(0,FB.y0,0,FB.y1); wg.addColorStop(0,rgb(mixc(steel,[150,154,162],.2))); wg.addColorStop(1,rgb(steelD)); ctx.fillStyle=wg; ctx.fillRect(FB.x0,FB.y0,FB.x1-FB.x0,FB.y1-FB.y0);
+  // beyond the doors: a bright, warm morning corridor
+  if(D>0){
+    ctx.save(); ctx.beginPath(); ctx.rect(DOOR.x0,DOOR.y0,DOOR.x1-DOOR.x0,DOOR.y1-DOOR.y0); ctx.clip();
+    const bg=ctx.createLinearGradient(0,DOOR.y0,0,DOOR.y1); bg.addColorStop(0,'rgb(255,236,204)'); bg.addColorStop(.62,'rgb(255,222,176)'); bg.addColorStop(1,'rgb(226,180,134)');
+    ctx.fillStyle=bg; ctx.fillRect(DOOR.x0,DOOR.y0,DOOR.x1-DOOR.x0,DOOR.y1-DOOR.y0);
+    // a tall window far away, the floor running to it
+    ctx.fillStyle='rgba(255,250,236,.95)'; ctx.fillRect(400,800,140,560);
+    ctx.fillStyle='rgba(214,170,126,.55)'; quad([DOOR.x0,DOOR.y1],[DOOR.x1,DOOR.y1],[560,1420],[380,1420]); ctx.fill();
+    const wgl=ctx.createRadialGradient(470,1080,0,470,1080,520); wgl.addColorStop(0,'rgba(255,248,226,.9)'); wgl.addColorStop(1,'rgba(255,240,210,0)'); ctx.fillStyle=wgl; ctx.fillRect(DOOR.x0,DOOR.y0,DOOR.x1-DOOR.x0,DOOR.y1-DOOR.y0);
+    ctx.restore();
+  }
+  // door panels slide into the wall
+  const hw=(DOOR.x1-DOOR.x0)/2, slide=hw*D;
+  ctx.save(); ctx.beginPath(); ctx.rect(DOOR.x0,DOOR.y0,DOOR.x1-DOOR.x0,DOOR.y1-DOOR.y0); ctx.clip();
+  for(const sd of [-1,1]){
+    const x0=sd<0?DOOR.x0-slide:470+slide, w=hw;
+    const pg=ctx.createLinearGradient(x0,0,x0+w,0); pg.addColorStop(0,rgb(mixc(steel,[255,255,255],.10))); pg.addColorStop(.5,rgb(mixc(steel,[255,255,255],.22))); pg.addColorStop(1,rgb(mixc(steel,[0,0,0],.08)));
+    ctx.fillStyle=pg; ctx.fillRect(x0,DOOR.y0,w,DOOR.y1-DOOR.y0);
+    // brushed lines
+    ctx.strokeStyle='rgba(255,255,255,.05)'; ctx.lineWidth=2; for(let k=1;k<9;k++){ctx.beginPath(); ctx.moveTo(x0+k*w/9,DOOR.y0); ctx.lineTo(x0+k*w/9,DOOR.y1); ctx.stroke();}
+    ctx.fillStyle='rgba(0,0,0,.28)'; ctx.fillRect(sd<0?x0+w-3:x0,DOOR.y0,3,DOOR.y1-DOOR.y0);
+  }
+  ctx.restore();
+  // door frame
+  ctx.strokeStyle=rgb(steelD); ctx.lineWidth=26; ctx.strokeRect(DOOR.x0-13,DOOR.y0-13,DOOR.x1-DOOR.x0+26,DOOR.y1-DOOR.y0+13);
+  ctx.strokeStyle='rgba(255,255,255,.10)'; ctx.lineWidth=4; ctx.strokeRect(DOOR.x0-24,DOOR.y0-24,DOOR.x1-DOOR.x0+48,DOOR.y1-DOOR.y0+24);
+  // light pouring from the open doors onto the floor and into the cabin
+  if(D>0){
+    ctx.save(); ctx.globalCompositeOperation='screen';
+    const a=D*.55; const og=ctx.createLinearGradient(0,DOOR.y1,0,NB.y1); og.addColorStop(0,`rgba(255,214,160,${a})`); og.addColorStop(1,'rgba(255,200,140,0)'); ctx.fillStyle=og;
+    const ww=(DOOR.x1-DOOR.x0)*D;
+    quad([470-ww/2,DOOR.y1],[470+ww/2,DOOR.y1],[470+ww*1.9,NB.y1],[470-ww*1.9,NB.y1]); ctx.fill();
+    const hg=ctx.createRadialGradient(470,1300,0,470,1300,1300); hg.addColorStop(0,`rgba(255,220,170,${.5*D})`); hg.addColorStop(1,'rgba(255,210,160,0)'); ctx.fillStyle=hg; ctx.fillRect(-700,-200,2400,3000);
+    ctx.restore();
+  }
+  drawLamps(t,W);
+}
+// floor lamps: a column beside the doors, lit one by one going up (no digits: in a mirror they would read backwards)
+const NL=6, LX=862, LY0=1390, LDY=124;
+function floorPos(t){return K([[0,.2],[20.6,4.872,'lin'],[22.3,5.0,'o'],[40,5.0]],t);}
+function drawLamps(t,W){
+  const L=floorPos(t), back=ss(38.4,39.6,t);
+  ctx.fillStyle='rgba(0,0,0,.35)'; rr(LX-34,LY0-(NL-1)*LDY-120,68,(NL-1)*LDY+160,34); ctx.fill();
+  // a small up arrow on top
+  ctx.fillStyle=`rgba(255,230,190,${.35+.5*liftV(t)*(1-W*.3)})`; ctx.beginPath(); ctx.moveTo(LX,LY0-(NL-1)*LDY-96); ctx.lineTo(LX+18,LY0-(NL-1)*LDY-66); ctx.lineTo(LX-18,LY0-(NL-1)*LDY-66); ctx.closePath(); ctx.fill();
+  for(let i=0;i<NL;i++){
+    const y=LY0-i*LDY; const lit=lerp(clamp(1-Math.abs(L-i)*2.2),clamp(1-Math.abs(.2-i)*2.2),back);
+    ctx.fillStyle='rgba(30,32,38,.9)'; ctx.beginPath(); ctx.arc(LX,y,21,0,7); ctx.fill(); ctx.strokeStyle='rgba(255,255,255,.10)'; ctx.lineWidth=3; ctx.stroke();
+    if(lit>0){ctx.save(); ctx.globalCompositeOperation='screen'; const g=ctx.createRadialGradient(LX,y,0,LX,y,95); g.addColorStop(0,`rgba(255,200,120,${.9*lit})`); g.addColorStop(1,'rgba(255,190,110,0)'); ctx.fillStyle=g; ctx.fillRect(LX-95,y-95,190,190); ctx.restore();
+      ctx.fillStyle=`rgba(255,226,170,${lit})`; ctx.beginPath(); ctx.arc(LX,y,17,0,7); ctx.fill();}
+  }
+}
+function rr(x,y,w,h,r){ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();}
+
+// ---------------- the man ----------------
+function ik(sx,sy,hx_,hy,l1,l2,side){
+  let dx=hx_-sx, dy=hy-sy, d=Math.hypot(dx,dy); const dd=clamp(d,Math.abs(l1-l2)+1,l1+l2-1);
+  const a=Math.atan2(dy,dx), c=clamp((l1*l1+dd*dd-l2*l2)/(2*l1*dd),-1,1), b=Math.acos(c);
+  const ang=a+side*b; return [sx+Math.cos(ang)*l1, sy+Math.sin(ang)*l1];
+}
+function body(t){
+  const f=tv('lean',t), p=tv('pitch',t), turn=tv('turn',t), br=breath(t), W=tv('W',t), sl=tv('slump',t);
+  const S_=sim(t); const bob=S_.bob;
+  const heave=bell(5.4,8.8,t)*(Math.sin((t-5.4)*2*Math.PI/2.4)*.5+.5);
+  const exhale=bell(23.4,26.4,t);
+  const cx=470+chestX(t);
+  const shY=880+(f>0?f*300:f*70)-br*lerp(4.5,3,W)+heave*7+exhale*10+sl*30+bob;
+  const shW=205*(1+Math.max(f,0)*.1)*(1-sl*.03);
+  const hxp=470+turn*22+chestX(t)*.6, hyp=(f>0?690+f*345:690+f*95)-br*lerp(3,2,W)+heave*5+exhale*6+sl*22+bob*.8;
+  const hs=1+Math.max(f,0)*.1+Math.min(f,0)*.14;
+  return {f,p,turn,cx,shY,shW,hxp,hyp,hs,W,sl,bob,tie:S_.tie,t};
+}
+function poseHand(name,s,side){
+  const t=s.t;
+  if(name==='side') return [s.cx+side*(222-s.sl*6)+Math.sin(t*.8+side)*2, 1400+s.sl*20+s.bob];
+  if(name==='collar') return [s.cx+side*62, s.shY+40];
+  if(name==='rail') return [470+side*238, 1500];
+  if(name==='cheek') return [s.hxp+side*74*s.hs, s.hyp+(160+s.p*60)*s.hs];
+  if(name==='dua') return [470+side*64, 1188+s.bob*.6+Math.sin(t*1.1)*2];
+}
+function hands(s){
+  const t=s.t; let i=0; while(i<HP.length-2&&t>HP[i+1][0]) i++;
+  const a=HP[i], b=HP[i+1]; const u=t<=a[0]?0:(EZ[b[2]||'io'])(clamp((t-a[0])/(b[0]-a[0])));
+  const res={}; for(const side of [-1,1]){const pa=poseHand(a[1],s,side), pb=poseHand(b[1],s,side); res[side]=[lerp(pa[0],pb[0],u),lerp(pa[1],pb[1],u)];}
+  const w=n=>(a[1]===n?1-u:0)+(b[1]===n?u:0);
+  res.w={side:w('side'),collar:w('collar'),rail:w('rail'),cheek:w('cheek'),dua:w('dua')};
+  return res;
+}
+function drawLegs(s){
+  const hipY=1440+s.sl*12+s.bob, cx=s.cx;
+  for(const sd of [-1,1]){
+    const x0=cx+sd*95, x1=470+sd*92;
+    ctx.fillStyle=fc(P.pants); ctx.beginPath(); ctx.moveTo(x0-sd*95,hipY); ctx.lineTo(x0+sd*88,hipY); ctx.lineTo(x1+sd*78,2290); ctx.lineTo(x1-sd*70,2290); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,.12)'; ctx.beginPath(); ctx.moveTo(x0+sd*40,hipY+40); ctx.lineTo(x0+sd*88,hipY); ctx.lineTo(x1+sd*78,2290); ctx.lineTo(x1+sd*36,2290); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=fc(P.shoe); ctx.beginPath(); ctx.ellipse(x1+sd*14,2318,98,44,0,0,7); ctx.fill();
+  }
+  // belt
+  ctx.fillStyle='#1c1d22'; rr(cx-192,hipY-26,384,30,8); ctx.fill();
+}
+function drawTorso(s){
+  const {cx,shY,shW}=s; const bot=1440+s.sl*12+s.bob;
+  ctx.fillStyle=fc(P.shirt);
+  ctx.beginPath(); ctx.moveTo(cx-shW+24,bot); ctx.lineTo(cx-shW-4,shY+90); ctx.quadraticCurveTo(cx-shW+6,shY+8,cx-shW+90,shY); ctx.lineTo(cx+shW-90,shY); ctx.quadraticCurveTo(cx+shW-6,shY+8,cx+shW+4,shY+90); ctx.lineTo(cx+shW-24,bot); ctx.closePath(); ctx.fill();
+  const g=ctx.createLinearGradient(cx-shW,0,cx+shW,0); g.addColorStop(0,'rgba(0,0,0,.12)'); g.addColorStop(.3,'rgba(0,0,0,0)'); g.addColorStop(.75,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.18)'); ctx.fillStyle=g; ctx.fill();
+  // soft folds that breathe
+  ctx.strokeStyle='rgba(60,70,84,.18)'; ctx.lineWidth=6; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(cx-120,shY+260); ctx.quadraticCurveTo(cx-90,shY+330+breath(s.t)*4,cx-130,bot-60); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+130,shY+240); ctx.quadraticCurveTo(cx+96,shY+320-breath(s.t)*4,cx+124,bot-80); ctx.stroke();
+  // neck
+  ctx.fillStyle=fc(P.skinD); ctx.fillRect(s.hxp-58,s.hyp+60,116,Math.max(0,shY-s.hyp-50)); ctx.beginPath(); ctx.ellipse(cx,shY+2,60,30,0,0,7); ctx.fill();
+  // button placket
+  ctx.strokeStyle='rgba(80,92,108,.35)'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(cx,shY+40); ctx.lineTo(cx,bot); ctx.stroke();
+  // tie (a real pendulum hanging from the knot)
+  const kx=cx, ky=shY+4, L=360*(1-Math.max(s.f,0)*.55), th=s.tie;
+  const ex=kx+Math.sin(th)*L, ey=ky+Math.cos(th)*L; const mx=kx+Math.sin(th*.55)*L*.55, my=ky+Math.cos(th*.55)*L*.55;
+  const nx=Math.cos(th), ny=-Math.sin(th);
+  ctx.fillStyle=fc(P.tie); ctx.beginPath(); ctx.moveTo(kx-16,ky+10); ctx.lineTo(kx+16,ky+10);
+  ctx.quadraticCurveTo(mx+30*nx,my+30*ny,ex+40*nx,ey-30+40*ny); ctx.lineTo(ex,ey+20); ctx.lineTo(ex-40*nx,ey-30-40*ny); ctx.quadraticCurveTo(mx-30*nx,my-30*ny,kx-16,ky+10); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=fc(P.tieD); ctx.beginPath(); ctx.moveTo(kx-24,ky-10); ctx.lineTo(kx+24,ky-10); ctx.lineTo(kx+15,ky+22); ctx.lineTo(kx-15,ky+22); ctx.closePath(); ctx.fill();
+  // collar points
+  ctx.fillStyle=rgb(mixc(P.shirt,[255,255,255],.22));
+  for(const sd of [-1,1]){ctx.beginPath(); ctx.moveTo(kx+sd*6,ky-26); ctx.lineTo(kx+sd*66,ky-30); ctx.lineTo(kx+sd*46,ky+34); ctx.closePath(); ctx.fill();}
+  ctx.strokeStyle=fc(P.shirtD); ctx.lineWidth=4; for(const sd of [-1,1]){ctx.beginPath(); ctx.moveTo(kx+sd*66,ky-30); ctx.lineTo(kx+sd*46,ky+34); ctx.lineTo(kx+sd*10,ky-12); ctx.stroke();}
+}
+function elbow(s,side,h,w){
+  const sx=s.cx+side*(s.shW-34), sy=s.shY+52; const k=armK(w);
+  const e=ik(sx,sy,h[0],h[1],235*k,225*k,side<0?1:-1);
+  if(w.cheek<=0) return e;
+  const ec=[lerp(sx,h[0],.55)+side*18, Math.max(h[1]+175, sy+120)];
+  return [lerp(e[0],ec[0],w.cheek), lerp(e[1],ec[1],w.cheek)];
+}
+function armK(w){return 1-.4*w.cheek-.18*w.collar-.16*w.dua;}
+function drawArm(s,side,h,w){
+  const sx=s.cx+side*(s.shW-34), sy=s.shY+52; const k=armK(w);
+  const e=elbow(s,side,h,w);
+  ctx.lineCap='round';
+  ctx.strokeStyle=fc(P.shirtD); ctx.lineWidth=66; ctx.beginPath(); ctx.moveTo(e[0],e[1]); ctx.lineTo(lerp(e[0],h[0],.8),lerp(e[1],h[1],.8)); ctx.stroke();
+  ctx.strokeStyle=fc(P.shirt); ctx.lineWidth=58; ctx.beginPath(); ctx.moveTo(e[0],e[1]); ctx.lineTo(lerp(e[0],h[0],.8),lerp(e[1],h[1],.8)); ctx.stroke();
+  // cuff + wrist
+  ctx.strokeStyle=fc(P.skinD); ctx.lineWidth=40; ctx.beginPath(); ctx.moveTo(lerp(e[0],h[0],.82),lerp(e[1],h[1],.82)); ctx.lineTo(h[0],h[1]); ctx.stroke();
+  ctx.strokeStyle=fc(P.shirtD); ctx.lineWidth=86; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(e[0],e[1]); ctx.stroke();
+  ctx.strokeStyle=fc(P.shirt); ctx.lineWidth=76; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(e[0],e[1]); ctx.stroke();
+  ctx.fillStyle=fc(P.shirt); ctx.beginPath(); ctx.arc(e[0],e[1],34,0,7); ctx.fill();
+}
+function drawHand(h,side,w,s){
+  const [x,y]=h;
+  // relaxed / collar / grip / pointing: one soft mitten shape that morphs a little
+  const a=1-w.dua; if(a<=.01) return; ctx.save(); ctx.globalAlpha=a;
+  ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(x,y+7,33,30,0,0,7); ctx.fill();
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.ellipse(x,y,32,29+w.rail*-4,0,0,7); ctx.fill();
+  // fingers wrapping the rail
+  if(w.rail>.01){ctx.globalAlpha=a*w.rail; ctx.strokeStyle=fc(P.skinD); ctx.lineWidth=5; for(let k=0;k<3;k++){ctx.beginPath(); ctx.moveTo(x-22+k*16,y+4); ctx.lineTo(x-22+k*16,y+24); ctx.stroke();} ctx.globalAlpha=a;}
+  // index finger up at the corner of his mouth
+  if(w.cheek>.01){ctx.globalAlpha=a*w.cheek; ctx.strokeStyle=fc(P.skin); ctx.lineWidth=22; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(x-side*8,y-16); ctx.lineTo(x-side*22,y-56); ctx.stroke(); ctx.globalAlpha=a;}
+  // pinching the collar
+  if(w.collar>.01){ctx.globalAlpha=a*w.collar; ctx.strokeStyle=fc(P.skinD); ctx.lineWidth=5; ctx.beginPath(); ctx.arc(x-side*6,y-6,14,0,Math.PI*1.4); ctx.stroke(); ctx.globalAlpha=a;}
+  ctx.restore();
+}
+function drawDuaHands(s,t,w){
+  const a=w; if(a<=.01) return; const y=1188+s.bob*.6+Math.sin(t*1.1)*2; ctx.save(); ctx.globalAlpha=a;
+  for(const sd of [-1,1]){const x=470+sd*60;
+    ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(x,y+6,74,52,sd*.18,0,Math.PI); ctx.fill();
+    ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.ellipse(x,y,72,46,sd*.18,0,Math.PI); ctx.fill();
+    ctx.strokeStyle=fc(P.skinD); ctx.lineWidth=5; for(let k=0;k<3;k++){ctx.beginPath(); ctx.arc(x+sd*(k*20-16),y+4,16,Math.PI*.15,Math.PI*.85); ctx.stroke();}}
+  ctx.restore();
+}
+// the tear: forms in his eye, runs down his cheek, hangs on his beard, falls into his palms
+const TEAR={form:17.4, run0:17.9, run1:18.85, hang1:19.06, land:19.3};
+function tearState(s,t){
+  if(t<TEAR.form||t>TEAR.land+.02) return null;
+  const sx=-58, ex=-58+6; // his right eye (screen left)
+  const hl=(x,y)=>[s.hxp+x*s.hs, s.hyp+y*s.hs];
+  if(t<TEAR.run0){const g=ss(TEAR.form,TEAR.run0,t); const [x,y]=hl(sx+10,30+s.p*60); return {x,y,r:4+g*6,trail:null,g};}
+  if(t<TEAR.run1){const u=inv(TEAR.run0,TEAR.run1,t); const v=sm(u)*.35+u*u*.65; // starts slowly, catches, then runs
+    const yy=lerp(30,150,v)+s.p*60; const [x,y]=hl(sx+10-v*8,yy); const [x0,y0]=hl(sx+10,30+s.p*60); return {x,y,r:10,trail:[x0,y0],g:1};}
+  if(t<TEAR.hang1){const u=inv(TEAR.run1,TEAR.hang1,t); const [x,y]=hl(sx+2,150+s.p*60); return {x,y:y+u*10,r:10+u*3,trail:null,g:1};}
+  // free fall: y = y0 + g t^2 / 2 with g = 9.8 m/s^2 at about 1300 px per metre
+  const [x0,y0]=hl(sx+2,160+s.p*60); const dt=t-TEAR.hang1; const yLand=1188+s.bob*.6-6; const y=Math.min(yLand,y0+.5*12700*dt*dt);
+  return {x:x0,y,r:11,trail:null,g:1,fall:true};
+}
+function drawTear(s,t){
+  const st=tearState(s,t); if(!st) return; ctx.save();
+  if(st.trail){ctx.strokeStyle='rgba(225,240,255,.35)'; ctx.lineWidth=6; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(st.trail[0],st.trail[1]); ctx.lineTo(st.x,st.y-6); ctx.stroke();}
+  const gold=ss(TEAR.hang1,TEAR.land,t);
+  ctx.fillStyle=rgb(mixc([222,238,255],[255,226,160],gold),.85*st.g); ctx.beginPath(); ctx.ellipse(st.x,st.y,st.r*.82,st.r*(st.fall?1.15:1),0,0,7); ctx.fill();
+  ctx.fillStyle=`rgba(255,255,255,${.9*st.g})`; ctx.beginPath(); ctx.arc(st.x-st.r*.3,st.y-st.r*.35,st.r*.28,0,7); ctx.fill();
+  ctx.restore();
+}
+// the cheek trail stays a little while after
+function drawTrail(s,t){
+  const a=ss(18.0,18.5,t)*(1-ss(21,24,t)); if(a<=0) return; const hl=(x,y)=>[s.hxp+x*s.hs, s.hyp+y*s.hs];
+  const [x0,y0]=hl(-48,30+s.p*60), [x1,y1]=hl(-56,148+s.p*60);
+  ctx.strokeStyle=`rgba(225,240,255,${.28*a})`; ctx.lineWidth=5; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+}
+function drawHead(s,t){
+  const {hxp,hyp,hs,p,turn}=s; ctx.save(); ctx.translate(hxp,hyp); ctx.scale(hs,hs);
+  const fy=p*72, sq=1-Math.max(p,0)*.35, tx=turn*26;
+  ctx.fillStyle=fc(P.skinD); for(const sd of [-1,1]){ctx.beginPath(); ctx.ellipse(sd*148-tx*.3,12+fy*.4,28,38,0,0,7); ctx.fill();}
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill();
+  const sg=ctx.createRadialGradient(-50-tx,-50,20,0,0,160); sg.addColorStop(0,'rgba(255,255,255,.08)'); sg.addColorStop(1,'rgba(120,60,30,.18)'); ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.arc(0,0,151,0,7); ctx.clip();
+  const hl=-82+Math.max(p,0)*120;
+  ctx.fillStyle=fc(P.hair); ctx.beginPath(); ctx.moveTo(-160,hl+10); ctx.quadraticCurveTo(-90+tx,hl-26,tx*.6,hl-18); ctx.quadraticCurveTo(90+tx,hl-26,160,hl+10); ctx.lineTo(160,-200); ctx.lineTo(-160,-200); ctx.closePath(); ctx.fill();
+  ctx.fillRect(-160,hl,22,90); ctx.fillRect(138,hl,22,90);
+  const feat=1-ss(.62,.9,p);
+  const S=tv('S',t), teeth=tv('teeth',t), eyeS=tv('eyeS',t), trem=tv('trem',t), wet=tv('wet',t);
+  const tr=trem*(Math.sin(t*2*Math.PI*7.3)*.6+Math.sin(t*2*Math.PI*4.1+1)*.4);
+  if(feat>0){ ctx.globalAlpha=feat;
+    const ey=-10+fy-eyeS*4, ex=58;
+    const lid=clamp(Math.max(tv('lid',t),blink(t)));
+    for(const sd of [-1,1]){const x=sd*ex+tx;
+      const sad=tv('brow',t); const top=ey-38*sq, cover=lid*74*sq; const lidY=top+cover;
+      const lowY=ey+36*sq-eyeS*36*sq;
+      ctx.save(); ctx.beginPath(); ctx.ellipse(x,ey,30,36*sq,0,0,7); ctx.clip();
+      ctx.fillStyle='#fbf7f2'; ctx.fillRect(x-32,ey-40,64,80);
+      const lx=tv('lookX',t)*11, ly=tv('lookY',t)*11*sq;
+      ctx.fillStyle='#1c130e'; ctx.beginPath(); ctx.ellipse(x+lx,ey+ly+3,20,23*sq,0,0,7); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(x+lx-7,ey+ly-7,6+wet*1.5,0,7); ctx.fill();
+      if(wet>.3){ctx.fillStyle=`rgba(255,255,255,${.7*(wet-.3)})`; ctx.beginPath(); ctx.arc(x+lx+6,ey+ly+10,3.5,0,7); ctx.fill();}
+      ctx.strokeStyle=`rgba(200,225,255,${.55*wet})`; ctx.lineWidth=5; ctx.beginPath(); ctx.ellipse(x,ey,29,35*sq,0,Math.PI*.18,Math.PI*.82); ctx.stroke();
+      // upper lid
+      ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.moveTo(x-40,top-12); ctx.lineTo(x+40,top-12); ctx.lineTo(x+40,lidY+sd*sad*7); ctx.quadraticCurveTo(x,lidY+8*(1-lid),x-40,lidY-sd*sad*7); ctx.closePath(); ctx.fill();
+      // lower lid rises when the eyes smile
+      if(eyeS>0){ctx.beginPath(); ctx.moveTo(x-40,ey+44); ctx.lineTo(x+40,ey+44); ctx.lineTo(x+40,lowY+10*eyeS); ctx.quadraticCurveTo(x,lowY-8*eyeS,x-40,lowY+10*eyeS); ctx.closePath(); ctx.fill();}
+      ctx.restore();
+      ctx.strokeStyle='#2a1a12'; ctx.lineWidth=5; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(x-30,Math.min(lidY,ey+30)-sd*sad*6+2); ctx.quadraticCurveTo(x,Math.min(lidY,ey+30)+8*(1-lid)+3,x+30,Math.min(lidY,ey+30)+sd*sad*6+2); ctx.stroke();
+      if(eyeS>0){ctx.strokeStyle=`rgba(140,80,52,${.55*eyeS})`; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(x-26,lowY+12*eyeS); ctx.quadraticCurveTo(x,lowY-4*eyeS,x+26,lowY+12*eyeS); ctx.stroke();
+        // soft cheek lift under the eye
+        ctx.fillStyle=`rgba(255,190,150,${.22*eyeS})`; ctx.beginPath(); ctx.ellipse(x+sd*10,ey+56,34,16,0,0,7); ctx.fill();}
+      const by=ey-62*sq-(1-lid)*4+eyeS*2; ctx.strokeStyle=fc(P.hair); ctx.lineWidth=15;
+      ctx.beginPath(); ctx.moveTo(x-sd*30,by-sad*10); ctx.quadraticCurveTo(x,by-6,x+sd*30,by+sad*8); ctx.stroke();
+    }
+    ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(tx*1.1,32+fy,20,14*sq,0,0,7); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  // beard, then the mouth cut into it
+  const by0=fy*.9;
+  ctx.fillStyle=fc(P.beard); ctx.beginPath(); ctx.moveTo(-152,10+by0*.4); ctx.quadraticCurveTo(-150,150+by0,tx*.5,190+by0); ctx.quadraticCurveTo(150,150+by0,152,10+by0*.4);
+  ctx.lineTo(118,22+by0*.6); ctx.quadraticCurveTo(70+tx,70+by0,tx,72+by0); ctx.quadraticCurveTo(-70+tx,70+by0,-118,22+by0*.6); ctx.closePath(); ctx.fill();
+  if(feat>0){ctx.globalAlpha=feat;
+    ctx.fillStyle=fc(P.beard); ctx.beginPath(); ctx.ellipse(tx,66+fy,58,17*sq,0,0,7); ctx.fill();
+    const my=100+fy; const hw=24+Math.max(S,0)*14+teeth*20+Math.min(S,0)*-4; const up=S*12+tr*2.2;
+    const talk=tv('talk',t)*(Math.sin(t*2*Math.PI*3.1)*.5+.5)*(Math.sin(t*2*Math.PI*1.3)*.3+.7);
+    const open=teeth*20+talk*8;
+    // lower lip: a soft warm band under the mouth line so it reads inside the beard
+    ctx.fillStyle='#a8584a'; ctx.beginPath(); ctx.moveTo(tx-hw+4,my-up+3); ctx.quadraticCurveTo(tx,my+(S>0?S*14:-S*-4)+open*1.25+16,tx+hw-4,my-up+3); ctx.quadraticCurveTo(tx,my+(S>0?S*10:0)+open*1.2+4,tx-hw+4,my-up+3); ctx.fill();
+    if(open>.5){ctx.save(); ctx.fillStyle='#4a1d18'; ctx.beginPath(); ctx.moveTo(tx-hw,my-up); ctx.quadraticCurveTo(tx,my-up*.15+tr*1.2,tx+hw,my-up); ctx.quadraticCurveTo(tx,my+open*1.25+(S>0?S*10:0),tx-hw,my-up); ctx.closePath(); ctx.fill(); ctx.clip();
+      if(teeth>.02){ctx.fillStyle=`rgba(251,246,238,${clamp(teeth*1.6)})`; ctx.fillRect(tx-hw,my-up-14,hw*2,14+open*.55); ctx.strokeStyle=`rgba(170,150,140,${.5*teeth})`; ctx.lineWidth=2; for(let k=-2;k<=2;k++){ctx.beginPath(); ctx.moveTo(tx+k*hw*.3,my-up-14); ctx.lineTo(tx+k*hw*.3,my-up+open*.5); ctx.stroke();}}
+      ctx.restore();}
+    ctx.strokeStyle='#6e3226'; ctx.lineWidth=7; ctx.lineCap='round'; ctx.beginPath();
+    ctx.moveTo(tx-hw-2,my-up+tr*.5); ctx.quadraticCurveTo(tx,my+(open>.5?-up*.15:(S>0?S*14:S*-3))-tr*1.5,tx+hw+2,my-up-tr*.5); ctx.stroke();
+    // strained corners when the smile is forced
+    if(teeth>.05){ctx.strokeStyle=`rgba(90,45,30,${.55*teeth})`; ctx.lineWidth=4; for(const sd of [-1,1]){ctx.beginPath(); ctx.moveTo(tx+sd*(hw+8),my-up-14); ctx.quadraticCurveTo(tx+sd*(hw+16),my-up,tx+sd*(hw+8),my-up+12); ctx.stroke();}}
+    ctx.globalAlpha=1;}
+  ctx.restore();
+  ctx.restore();
+}
+function drawRail(t,W){
+  // the handrail fixed under the mirror (nearest to us)
+  const y=1508; const c1=mixc([170,178,190],[240,214,176],W), c2=mixc([90,96,108],[150,120,92],W);
+  const g=ctx.createLinearGradient(0,y-22,0,y+22); g.addColorStop(0,rgb(c1)); g.addColorStop(.45,rgb(mixc(c1,[255,255,255],.3))); g.addColorStop(1,rgb(c2));
+  ctx.fillStyle=g; rr(-900,y-22,2800,44,22); ctx.fill();
+  for(const x of [-280,1220]){ctx.fillStyle=rgb(c2); rr(x-18,y+10,36,90,10); ctx.fill();}
+}
+// ---------------- the mirror glass ----------------
+const SMUDGE=(()=>{const R=rng(1286),a=[];for(let i=0;i<14;i++)a.push({x:-200+R()*1500,y:100+R()*2400,r:40+R()*120,k:R()});return a;})();
+function drawMirror(t,W,c){
+  setCam(c);
+  // a soft diagonal sheen and a few faint fingerprints on the glass
+  ctx.save(); ctx.globalCompositeOperation='screen';
+  const g=ctx.createLinearGradient(-300,0,1400,2400); const rc=mixc([190,205,225],[255,230,190],W);
+  g.addColorStop(0,rgb(rc,0)); g.addColorStop(.30,rgb(rc,0)); g.addColorStop(.36,rgb(rc,.07)); g.addColorStop(.40,rgb(rc,0)); g.addColorStop(.47,rgb(rc,.04)); g.addColorStop(.5,rgb(rc,0)); g.addColorStop(1,rgb(rc,0));
+  ctx.fillStyle=g; ctx.fillRect(NB.x0,NB.y0,NB.x1-NB.x0,NB.y1-NB.y0);
+  for(const s of SMUDGE){const sg=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,s.r); sg.addColorStop(0,rgb(rc,.035+.02*s.k)); sg.addColorStop(1,rgb(rc,0)); ctx.fillStyle=sg; ctx.fillRect(s.x-s.r,s.y-s.r,s.r*2,s.r*2);}
+  ctx.restore();
+  // the mirror's own steel frame (seen only when we pull back)
+  ctx.strokeStyle=rgb(mixc([40,44,52],[90,72,58],W)); ctx.lineWidth=60; ctx.strokeRect(-860,-700,2660,4300);
+  ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=6; ctx.strokeRect(-830,-670,2600,4240);
+}
+// ---------------- the answer's light ----------------
+function hearts(t){let h=0; for(const b of [19.3,20.12,20.94]) h=Math.max(h,Math.exp(-Math.max(0,t-b)*3.2)*(t>=b?1:0)); return h;}
+function drawGoldLight(s,t,dw){
+  const on=ss(TEAR.land-.02,TEAR.land+.25,t)*(1-ss(25.0,27.0,t)); if(on<=0) return; const W=tv('W',t);
+  const [x,y]=[470,1180+s.bob*.6]; const r=(110+hearts(t)*90+W*480)*on;
+  ctx.save(); ctx.globalCompositeOperation='screen';
+  const g=ctx.createRadialGradient(x,y,0,x,y,r); g.addColorStop(0,`rgba(255,226,160,${.9*on})`); g.addColorStop(.25,`rgba(255,190,110,${.38*on})`); g.addColorStop(1,'rgba(255,170,90,0)');
+  ctx.fillStyle=g; ctx.fillRect(x-r,y-r,r*2,r*2);
+  // a small pool of gold in his palms
+  ctx.globalAlpha=on*dw; ctx.fillStyle='rgba(255,236,190,.95)'; ctx.beginPath(); ctx.ellipse(x,y+10,30+hearts(t)*8,9,0,0,7); ctx.fill();
+  // the ripple where the tear landed
+  const rp=t-TEAR.land; if(rp>0&&rp<1.2){ctx.globalAlpha=(1-rp/1.2)*.8; ctx.strokeStyle='rgba(255,236,190,1)'; ctx.lineWidth=3; ctx.beginPath(); ctx.ellipse(x,y+10,12+rp*70,4+rp*18,0,0,7); ctx.stroke();}
+  ctx.restore();
+}
+function drawBeams(t,c){
+  const D=tv('door',t), W=tv('W',t); const a=Math.max(D,W*.5); if(a<=0) return; setCam(c); ctx.save(); ctx.globalCompositeOperation='screen';
+  for(let i=0;i<5;i++){const x0=330+i*70, w=40+i*14, sh=Math.sin(t*.35+i*1.7)*.25+.75;
+    const g=ctx.createLinearGradient(0,600,0,3000); g.addColorStop(0,`rgba(255,214,150,${.10*D*sh})`); g.addColorStop(1,'rgba(255,214,150,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(x0,600); ctx.lineTo(x0+w,600); ctx.lineTo(x0+w+(x0-470)*2.2+w*2,3000); ctx.lineTo(x0+(x0-470)*2.2-w,3000); ctx.closePath(); ctx.fill();}
+  const R=rng(9); for(let i=0;i<54;i++){const bx=-100+R()*1300, by=200+R()*2200, sp=.2+R()*.5; const x=bx+Math.sin(t*sp+i)*30, y=by+Math.cos(t*sp*.8+i)*24-((t*6*sp)%60);
+    ctx.fillStyle=`rgba(255,236,200,${.55*a*(.4+.6*R())})`; ctx.beginPath(); ctx.arc(x,y,1.8+R()*2.4,0,7); ctx.fill();}
+  ctx.restore();
+}
+// ---------------- grade ----------------
+function grade(t,c,s){
+  const W=tv('W',t), D=tv('door',t); ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalCompositeOperation='multiply'; ctx.fillStyle=rgb(mixc([118,132,154],[255,236,206],Math.max(W,D*.8))); ctx.fillRect(0,0,W_,H_);
+  ctx.globalCompositeOperation='screen';
+  if(W>0){const [fx,fy]=toScr(c,470,1000); const r=1300*Math.max(c.Z,.6); const g=ctx.createRadialGradient(fx,fy,0,fx,fy,r); g.addColorStop(0,`rgba(255,190,110,${.28*W})`); g.addColorStop(1,`rgba(255,170,100,${.06*W})`); ctx.fillStyle=g; ctx.fillRect(0,0,W_,H_);}
+  ctx.globalCompositeOperation='source-over';
+  const v=ctx.createRadialGradient(540,920,480,540,960,1350); v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,`rgba(0,0,0,${lerp(.5,.24,W)})`); ctx.fillStyle=v; ctx.fillRect(0,0,W_,H_);
+}
+// ---------------- text ----------------
+const A1a='إِنَّمَا أَشْكُو بَثِّي وَحُزْنِي', A1b='إِلَى اللَّهِ', A2='وَأَعْلَمُ مِنَ اللَّهِ مَا لَا تَعْلَمُونَ';
+const E1a='I only complain of my suffering', E1b='and my grief to Allah.', E2a='and I know from Allah', E2b='that which you do not know.';
+function drawText(t){
+  ctx.setTransform(1,0,0,1,0,0); const W=tv('W',t), D=tv('door',t); const TXC=505; const sh=Math.max(W,D);
+  if(sh>0){const sc=ctx.createRadialGradient(TXC,520,40,TXC,520,640); sc.addColorStop(0,`rgba(60,32,12,${.46*sh})`); sc.addColorStop(1,'rgba(60,32,12,0)'); ctx.save(); ctx.translate(TXC,520); ctx.scale(1,.6); ctx.translate(-TXC,-520); ctx.fillStyle=sc; ctx.fillRect(TXC-680,-160,1360,1360); ctx.restore();}
+  ctx.save(); ctx.textBaseline='middle'; ctx.direction='rtl'; ctx.textAlign='center';
+  let fs=96; ctx.font=fs+'px AmiriQ'; let wa=ctx.measureText(A1a).width, wb=ctx.measureText(A1b).width; const gap=30; let tot=wa+wb+gap;
+  if(tot>900){fs=Math.floor(fs*900/tot); ctx.font=fs+'px AmiriQ'; wa=ctx.measureText(A1a).width; wb=ctx.measureText(A1b).width; tot=wa+wb+gap*fs/96;}
+  const y1=338; const glowQ=ss(20.4,22.2,t)*(1-ss(37.6,38.8,t));
+  ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=22; ctx.fillStyle='#fff7ea';
+  ctx.fillText(A1a,TXC+tot/2-wa/2,y1);
+  ctx.fillStyle=rgb(mixc([255,247,234],[255,214,140],glowQ)); if(glowQ>0){ctx.shadowColor=`rgba(255,190,100,${.9*glowQ})`; ctx.shadowBlur=22+30*glowQ;}
+  ctx.fillText(A1b,TXC-tot/2+wb/2,y1);
+  ctx.restore();
+  ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowBlur=16;
+  ctx.font='italic 60px CormI'; ctx.fillStyle='#f8efe0'; ctx.fillText(E1a,TXC,436); ctx.fillText(E1b,TXC,498); ctx.restore();
+  const out=1-ss(37.6,38.6,t); const p2=ss(25.4,27.6,t);
+  if(p2>0&&out>0){ctx.save(); ctx.font='76px AmiriQ'; ctx.direction='rtl'; ctx.textAlign='center'; ctx.textBaseline='middle'; const w=ctx.measureText(A2).width;
+    const xr=TXC+w/2+30, xl=xr-(w+60)*p2; ctx.beginPath(); ctx.rect(xl,520,xr-xl+40,150); ctx.clip();
+    ctx.globalAlpha=out; ctx.shadowColor='rgba(50,22,0,.8)'; ctx.shadowBlur=20; ctx.fillStyle='#fff6e4'; ctx.fillText(A2,TXC,598); ctx.restore();}
+  const e2=ss(27.4,29.0,t)*out, e3=ss(28.0,29.6,t)*out;
+  if(e2>0){ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='italic 52px CormI'; ctx.shadowColor='rgba(50,22,0,.85)'; ctx.shadowBlur=16; ctx.fillStyle='#fff6ea';
+    ctx.globalAlpha=e2; ctx.fillText(E2a,TXC,682); ctx.globalAlpha=e3; ctx.fillText(E2b,TXC,736); ctx.restore();}
+  const rf=ss(30.0,31.0,t)*out; if(rf>0){ctx.save(); ctx.textAlign='center'; ctx.font='30px Corm'; ctx.letterSpacing='7px'; ctx.fillStyle=`rgba(255,240,215,${.8*rf})`; ctx.shadowColor='rgba(60,30,0,.6)'; ctx.shadowBlur=10; ctx.fillText('YUSUF 12:86',TXC,800); ctx.restore();}
+  const wm=ss(31.4,32.4,t)*out; if(wm>0){ctx.save(); ctx.textAlign='center'; ctx.font='28px Corm'; ctx.letterSpacing='10px'; ctx.fillStyle=`rgba(255,240,215,${.55*wm})`; ctx.fillText('AYAH STUDIO',TXC,842); ctx.restore();}
+  if(window.SAFE){ctx.strokeStyle='rgba(255,0,0,.8)'; ctx.lineWidth=3; ctx.strokeRect(0,270,940,980);}
+}
+// ---------------- frame ----------------
+function draw(tr){
+  const t=wrap(tr);
+  ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over'; ctx.filter='none'; ctx.shadowColor='transparent';
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W_,H_);
+  const c=cam(t), W=tv('W',t), s=body(t), H=hands(s);
+  drawCabin(t,c,W);
+  setCam(c);
+  // a soft halo around him when the doors open behind him
+  const D=tv('door',t); if(D>0){ctx.save(); ctx.globalCompositeOperation='screen'; const g=ctx.createRadialGradient(470,1000,100,470,1000,700); g.addColorStop(0,`rgba(255,226,180,${.35*D})`); g.addColorStop(1,'rgba(255,210,160,0)'); ctx.fillStyle=g; ctx.fillRect(-300,200,1540,1700); ctx.restore();}
+  // the figure is drawn on its own layer, lit from the ceiling, then laid on the cabin with a soft shadow (or a warm halo once the doors open)
+  ctx=fctx; ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over'; ctx.clearRect(0,0,W_,H_); setCam(c);
+  drawLegs(s); drawTorso(s);
+  const behindHead=H.w.cheek<.5;
+  if(!behindHead){drawHead(s,t); drawTrail(s,t);}
+  drawArm(s,-1,H[-1],H.w); drawArm(s,1,H[1],H.w);
+  if(behindHead){drawHead(s,t); drawTrail(s,t);}
+  drawHand(H[-1],-1,H.w,s); drawHand(H[1],1,H.w,s); drawDuaHands(s,t,H.w.dua);
+  // light: from the ceiling panel (top bright, legs dark); a warm rim from behind when the doors open
+  ctx.setTransform(1,0,0,1,0,0); ctx.globalCompositeOperation='source-atop';
+  const [hx0,hy0]=toScr(c,470,520), [hx1,hy1]=toScr(c,470,2300);
+  const lg=ctx.createLinearGradient(0,hy0,0,hy1); lg.addColorStop(0,`rgba(225,236,255,${.12*(1-W*.6)})`); lg.addColorStop(.18,'rgba(0,0,0,0)'); lg.addColorStop(.45,'rgba(10,14,24,.18)'); lg.addColorStop(1,'rgba(10,14,24,.55)');
+  ctx.fillStyle=lg; ctx.fillRect(0,0,W_,H_);
+  // a soft side falloff so he feels round
+  const [cx0]=toScr(c,470,0); const r0=420*c.Z; const sgr=ctx.createLinearGradient(cx0-r0,0,cx0+r0,0); sgr.addColorStop(0,'rgba(10,14,24,.22)'); sgr.addColorStop(.3,'rgba(0,0,0,0)'); sgr.addColorStop(.7,'rgba(0,0,0,0)'); sgr.addColorStop(1,'rgba(10,14,24,.28)'); ctx.fillStyle=sgr; ctx.fillRect(0,0,W_,H_);
+  ctx.globalCompositeOperation='source-over';
+  ctx=mctx; ctx.setTransform(1,0,0,1,0,0);
+  ctx.save(); ctx.shadowColor=rgb(mixc([6,8,14],[255,220,170],D),lerp(.45,.95,D)); ctx.shadowBlur=lerp(46,90,D)*c.Z; ctx.shadowOffsetY=lerp(26,0,D)*c.Z; ctx.drawImage(fcv,0,0); ctx.restore();
+  setCam(c); drawRail(t,W);
+  // hands that hold the rail sit over it
+  if(H.w.rail>.01){ctx.save(); ctx.globalAlpha=H.w.rail; drawHand(H[-1],-1,H.w,s); drawHand(H[1],1,H.w,s); ctx.restore();}
+  drawTear(s,t);
+  drawGoldLight(s,t,H.w.dua);
+  drawMirror(t,W,c);
+  drawBeams(t,c);
+  grade(t,c,s);
+  // the gold stays bright above the grade
+  setCam(c); { const on=ss(TEAR.land-.02,TEAR.land+.25,t)*(1-ss(25.0,27.0,t)); if(on>0){ctx.save(); ctx.globalCompositeOperation='screen'; const r=(70+hearts(t)*50)*on; const g=ctx.createRadialGradient(470,1190,0,470,1190,r); g.addColorStop(0,`rgba(255,220,150,${.7*on})`); g.addColorStop(1,'rgba(255,200,120,0)'); ctx.fillStyle=g; ctx.fillRect(470-r,1190-r,r*2,r*2); ctx.restore();}}
+  drawText(t);
+}
+function events(){
+  const cur={type:'curves',dt:.05,W:[],D:[],V:[],A:[],T:[]};
+  for(let t=0;t<=END+1e-6;t+=.05){cur.W.push(+tv('W',t).toFixed(4)); cur.D.push(+tv('door',t).toFixed(4)); cur.V.push(+liftV(t).toFixed(4)); cur.A.push(+liftA(t).toFixed(1)); cur.T.push(+tv('talk',t).toFixed(3));}
+  return [cur,{type:'tear',land:TEAR.land,hang:TEAR.hang1}];
+}
+window.draw=draw; window.events=events; window.REAL_END=()=>END; window.tv=tv;
+window.tieRange=()=>{let a=1,b=-1;for(let t=0;t<40;t+=.05){const v=sim(t).tie;a=Math.min(a,v);b=Math.max(b,v);}return [a,b];};
+window.probe=(t)=>{const s=body(t),H=hands(s),c=cam(t); const te=tearState(s,t); return {hx:s.hxp,hy:s.hyp,sh:s.shY,lx:H[-1][0],ly:H[-1][1],rx:H[1][0],ry:H[1][1],tie:s.tie,bob:s.bob,Z:c.Z,CX:c.CX,CY:c.CY,tx:te?te.x:0,ty:te?te.y:0,
+  el:elbow(s,-1,H[-1],H.w), er:elbow(s,1,H[1],H.w)};};
+window.ready=(async()=>{await document.fonts.load('96px AmiriQ'); await document.fonts.load('italic 60px CormI'); await document.fonts.load('30px Corm'); return true;})();
+</script></body></html>
