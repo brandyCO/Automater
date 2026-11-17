@@ -1,0 +1,900 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:'AmiriQ';src:url(amiri.woff2) format('woff2');}
+@font-face{font-family:'Corm';src:url(corm.woff2) format('woff2');}
+@font-face{font-family:'CormI';src:url(cormi.woff2) format('woff2');}
+@font-face{font-family:'InterU';src:url(inter.otf) format('opentype');}
+html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}
+</style></head><body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// Enough (65:3). One continuous take, deterministic draw(t), loops at END.
+// A man at the kitchen table at night; unpaid bills pile on his back. He turns the calculator face down
+// and opens his hands. The bills float off him and settle on the table: still there, but no longer on him.
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const END=38.4, W_=1080, H_=1920;
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const lerp=(a,b,u)=>a+(b-a)*u;
+const sm=u=>{u=clamp(u);return u*u*u*(u*(u*6-15)+10);};
+const inv=(a,b,t)=>clamp((t-a)/(b-a));
+const ss=(a,b,t)=>sm(inv(a,b,t));
+const bell=(a,b,t)=>{const m=(a+b)/2;return ss(a,m,t)*(1-ss(m,b,t));};
+const EZ={io:sm, lin:u=>u, o:u=>1-Math.pow(1-u,3), i:u=>u*u*u, o2:u=>Math.sin(u*Math.PI/2), s:u=>u*u*(3-2*u)};
+function K(keys,t){
+  if(t<=keys[0][0]) return keys[0][1];
+  for(let i=0;i<keys.length-1;i++){const a=keys[i],b=keys[i+1]; if(t<=b[0]){const u=(t-a[0])/(b[0]-a[0]); return lerp(a[1],b[1],(EZ[b[2]||'io'])(u));}}
+  return keys[keys.length-1][1];
+}
+function KL(keys,t){return Math.exp(K(keys.map(k=>[k[0],Math.log(k[1]),k[2]]),t));}
+const mixc=(a,b,u)=>[lerp(a[0],b[0],u),lerp(a[1],b[1],u),lerp(a[2],b[2],u)];
+const rgb=(c,a=1)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const hx=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+const PER=r=>2*Math.PI*Math.max(1,Math.round(r*END/(2*Math.PI)))/END;   // loop-safe angular rate (whole cycles per reel)
+function rng(seed){let s=seed>>>0;return()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296;};}
+
+// ---------------- timeline ----------------
+const RESET=35.3;            // the camera is on the window; he is out of frame. Everything returns to frame 0 here.
+const T1=1.10, T2=3.90;      // the two bills land on his back
+const WR2=2.5, EXH=[26.7,29.0], UPR=[23.3,26.6], DUA_OPEN=11.3;
+const R0_=25.3, E0_=28.4;   // the v3 clock that the generic tables were written on (warped below)
+const DHIKR=[11.75,15.6,18.6];   // he says it three times: the bills go to the table, then levitate, then turn gold and vanish
+const TR={
+ lean:[[0,.6],[T1,.6],[T1+.28,.8,'o'],[2.0,.8],[2.5,.72],[3.75,.72],[T2,.74],[T2+.3,1.0,'i'],[5.1,1.0],[5.7,.86],[6.2,.85],[6.6,1.0,'i'],[7.0,1.0],[7.35,.93],[7.9,.93],[8.2,1.0],[9.2,1.0],[9.75,.9],[10.9,.9],[11.45,.38],[12.6,.36],[13.3,.36],[16.86,0],[17.8,0],[18.94,-.26],[R0_-.02,-.26],[R0_,.6,'lin'],[E0_,.6]],
+ pitch:[[0,.5],[T1,.5],[T1+.28,.75,'o'],[2.0,.75],[2.5,.56],[3.75,.56],[T2+.3,1,'i'],[5.1,1],[5.7,.72],[6.2,.72],[6.6,1],[7.0,1],[7.35,.7],[7.9,.7],[8.2,1],[9.2,1],[9.75,.55],[10.9,.55],[11.45,.02],[12.6,.04],[13.3,.15],[15.53,.3],[16.86,-.12],[17.8,-.16],[18.94,-.06],[R0_-.02,-.06],[R0_,.5,'lin'],[E0_,.5]],
+ turn:[[0,0],[E0_,0]],
+ roll:[[0,0],[17.99,0],[19.51,.11],[R0_-.02,.11],[R0_,0,'lin'],[E0_,0]],
+ arms:[[0,0],[T2,0],[T2+.3,1,'o'],[11.0,1],[11.6,0],[E0_,0]],
+ push:[[0,0],[5.0,0],[5.6,1],[6.2,1],[6.6,0],[E0_,0]],
+ calc:[[0,1],[T2,1],[T2+.3,0],[7.05,0],[7.4,1],[7.8,1],[8.15,0],[9.75,0],[10.15,1],[10.75,1],[11.05,0],[R0_-.02,0],[R0_,1,'lin'],[E0_,1]],
+ flip:[[0,0],[10.2,0],[10.72,1,'s'],[R0_-.02,1],[R0_,0,'lin'],[E0_,0]],
+ dua:[[0,0],[10.95,0],[11.6,1],[16.1,1],[17.23,0],[E0_,0]],
+ rest:[[0,0],[16.29,0],[17.42,1],[R0_-.02,1],[R0_,0,'lin'],[E0_,0]],
+ write:[[0,1],[T1,1],[T1+.2,0],[WR2,0],[WR2+.3,1],[T2,1],[T2+.2,0],[R0_-.02,0],[R0_,1,'lin'],[E0_,1]],
+
+ lid:[[0,.36],[T1,.36],[T1+.25,.88],[2.0,.85],[2.5,.42],[T2,.45],[T2+.3,.95],[7.0,.95],[7.35,.5],[7.9,.5],[8.2,.95],[9.2,.95],[9.6,.4],[10.8,.45],[11.4,.42],[12.4,.5],[12.75,.8],[14.0,.8],[14.6,.45],[15.6,.42],[16.6,.3],[18.6,.36],[19.4,.22],[23.3,.3],[24.2,.5],[25.53,.25],[26.86,.2],[27.6,.85],[29.5,.9],[30.2,.62],[32.0,.68],[RESET-.02,.68],[RESET,.36,'lin'],[END,.36]],
+ lookX:[[0,-.62],[T1,-.62],[T1+.3,-.2],[2.0,-.2],[2.5,-.62],[11.0,-.62],[11.4,0],[14.4,0],[14.9,-.5],[16.4,-.5],[17.2,-.45],[23.3,-.3],[24.3,0],[RESET-.02,0],[RESET,-.62,'lin'],[END,-.62]],
+ lookY:[[0,.75],[T1,.75],[T1+.3,.4],[2.0,.4],[2.5,.75],[9.6,.8],[10.8,.9],[11.4,-.5],[12.6,-.55],[14.4,-.5],[14.9,.55],[16.4,.5],[17.4,-.1],[19,-.15],[23.3,-.2],[24.77,-.2],[25.91,-.7],[26.86,-.75],[29.6,-.6],[30.4,-.35],[RESET-.02,-.35],[RESET,.75,'lin'],[END,.75]],
+ brow:[[0,.8],[T2,.85],[T2+.3,1.0],[11.0,.95],[13.26,.9],[15.0,.75],[17.5,.55],[20,.4],[23.3,.35],[25.72,.2],[27.42,0],[RESET-.02,0],[RESET,.8,'lin'],[END,.8]],
+ neckUp:[[0,0],[10.95,0],[11.55,1],[23.3,1],[24.3,.7],[26.9,0],[END,0]],
+ W:[[0,0],[12.59,0],[16.0,.12],[19.2,.28],[23.3,.48],[30.74,1,'o2'],[35.1,1],[36.1,0],[END,0]],
+ Z:[[0,1],[3.9,1],[4.3,1.03],[4.6,1.03],[5.6,.55],[6.6,.55],[7.6,1.0],[9.0,1.0],[10.0,1.32],[10.85,1.32],[11.75,1.0],[12.6,.98],[14.3,.88],[23.3,.91],[25.06,1.0],[28.6,.8],[33.4,.83],[34.9,1.2],[35.7,1.2],[END,1]],
+ CX:[[0,505],[4.6,505],[5.6,520],[6.6,520],[7.6,500],[9.0,500],[10.0,300],[10.85,300],[11.75,465],[12.6,470],[14.3,420],[23.3,445],[25.06,500],[28.6,640],[33.4,650],[34.9,1395],[35.7,1395],[END,505]],
+ CY:[[0,880],[4.6,880],[5.6,900],[6.6,900],[7.6,890],[9.0,890],[10.0,1010],[10.85,1010],[11.75,770],[12.6,770],[14.3,760],[23.3,760],[25.06,860],[28.6,728],[33.4,728],[34.9,610],[35.7,610],[END,880]],
+ stretch:[[0,0],[27.3,0],[28.3,1],[28.85,1],[29.8,0],[END,0]],
+ heart:[[0,0],[29.4,0],[30.4,1],[RESET-.02,1],[RESET,0,'lin'],[END,0]],
+ smile:[[0,0],[26.1,0],[27.8,.75],[29.0,.6],[30.2,.95],[RESET-.02,.95],[RESET,0,'lin'],[END,0]],
+};
+const MANUAL=new Set(['lid','lookX','lookY','brow','neckUp','W','Z','CX','CY','stretch','heart','smile']);
+// the three dhikr hold the body still between 13.3 s and 23.3 s; everything written after 13.3 s on the v3 clock moves 10 s later
+{const FR0=13.3, FSH=10; for(const k in TR){ if(MANUAL.has(k)) continue; const tab=TR[k], v=K(tab,FR0), out=[]; let ins=false;
+  for(const key of tab){ if(key[0]<FR0) out.push(key); else { if(!ins){out.push([FR0,v]); out.push([FR0+FSH,v]); ins=true;} if(key[0]>FR0) out.push([key[0]+FSH,...key.slice(1)]); } }
+  if(!ins){out.push([FR0,v]);} TR[k]=out; }}
+
+const tv=(k,t)=>K(TR[k],t);
+const HITS=[[T1,46],[T2,82]];
+function hitOff(t){let d=0;for(const[h,a]of HITS){const x=t-h;if(x<0)continue;d+=x<.09?a*sm(x/.09):a*Math.exp(-(x-.09)*3.0)*Math.cos((x-.09)*5.0);}return d;}
+function blink(t){let b=0;for(const bt of [2.2,3.3,9.4,15.2,20.3,24.8,26.2]){b=Math.max(b,bell(bt,bt+.2,t));}return b;}
+const BPH=(()=>{const n=Math.round(END*240),a=new Float64Array(n+1);let c=0;for(let i=0;i<n;i++){a[i]=c;const t=(i+.5)/240;c+=1/(240*lerp(3.4,5.6,tv('W',t)));}a[n]=c;const k=Math.round(c)/c;for(let i=0;i<=n;i++)a[i]*=k;return a;})();
+function breath(t){const x=clamp(t,0,END)*240,i=Math.min(Math.floor(x),BPH.length-2),u=x-i;return Math.sin(2*Math.PI*lerp(BPH[i],BPH[i+1],u));}
+// calculator: finger taps and the number on its screen
+const TAPS=[.2,.5,.8,2.95,3.35,7.5,7.7];
+const VALS=['$1,860','$2,740','$3,480','$4,915','$6,320','$9,870','$12,460','$14,050'];
+function tapDip(t){let d=0;for(const k of TAPS){d=Math.max(d,bell(k-.07,k+.09,t));}return d;}
+function calcVal(t){if(t>=RESET) return VALS[0]; let n=0;for(const k of TAPS) if(t>=k) n++; return VALS[n];}
+
+// ---------------- camera ----------------
+function cam(t){
+  const Z=KL(TR.Z,t), W=tv('W',t);
+  let CX=tv('CX',t), CY=tv('CY',t);
+  const drift=(1-W)*(1-ss(9.6,10.4,t)*(1-ss(12.7,13.4,t)));     // breathing handheld in the struggle, still at prayer, steady with hope
+  CX+= (2.0*Math.sin(t*PER(.61))+1.2*Math.sin(t*PER(1.37)+1))*drift/Z;
+  CY+= (1.6*Math.sin(t*PER(.53)+2)+1.0*Math.sin(t*PER(1.11)))*drift/Z;
+  CY-= hitOff(t)/Z;
+  return {Z,CX,CY};
+}
+function setCam(c){ctx.setTransform(c.Z,0,0,c.Z,540-c.CX*c.Z,960-c.CY*c.Z);}
+const toScr=(c,x,y)=>[540+(x-c.CX)*c.Z,960+(y-c.CY)*c.Z];
+
+// ---------------- palette ----------------
+const P={skin:hx('#e3a87b'),skinD:hx('#c98b60'),hair:hx('#221710'),beard:hx('#2a1b13'),shirt:hx('#8f969f'),shirtD:hx('#767c86'),shirtL:hx('#a3aab3'),
+ pants:hx('#2c3038'),wood:hx('#6b4a35'),woodD:hx('#4f3526'),woodL:hx('#83604a'),chair:hx('#3d2c22')};
+const fc=(c,a=1)=>rgb(c,a);
+function rr(x,y,w,h,r){ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();}
+function quad(p){ctx.beginPath(); ctx.moveTo(p[0][0],p[0][1]); for(let i=1;i<p.length;i++) ctx.lineTo(p[i][0],p[i][1]); ctx.closePath();}
+
+// ---------------- the room ----------------
+const WIN={x0:960,x1:1360,y0:250,y1:860};   // window on the back wall, to his right
+const TAB={by:1040,fy:1250,bl:-300,br:545,fl:-380,fr:610}; // table top (back edge y, front edge y, x extents)
+function skyCols(W){return {top:mixc([18,26,44],[246,178,120],W), bot:mixc([40,52,76],[255,224,170],W)};}
+function drawRoom(t,c,W){
+  ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#000'; ctx.fillRect(0,0,W_,H_);
+  setCam(c);
+  // back wall
+  const wall=mixc([58,64,76],[196,160,128],W);
+  const g=ctx.createLinearGradient(0,-400,0,1540); g.addColorStop(0,rgb(mixc(wall,[0,0,0],.25))); g.addColorStop(.55,rgb(wall)); g.addColorStop(1,rgb(mixc(wall,[0,0,0],.12)));
+  ctx.fillStyle=g; ctx.fillRect(-2600,-400,6400,1940);
+  // ceiling
+  ctx.fillStyle=rgb(mixc([40,44,52],[150,118,96],W)); ctx.fillRect(-2600,-1600,6400,1200);
+  ctx.fillStyle='rgba(0,0,0,.18)'; ctx.fillRect(-2600,-412,6400,14);
+  // floor (from the back wall toward us)
+  const fl=ctx.createLinearGradient(0,1530,0,3200); fl.addColorStop(0,rgb(mixc([50,52,58],[150,116,90],W))); fl.addColorStop(1,rgb(mixc([30,32,37],[104,78,60],W)));
+  ctx.fillStyle=fl; ctx.fillRect(-2600,1530,6400,2000);
+  ctx.fillStyle=rgb(mixc([36,38,44],[120,92,72],W)); ctx.fillRect(-2600,1522,6400,14); // skirting
+  // kitchen on the left: lower cabinets + counter, upper cabinets, fridge
+  const cab=mixc([66,72,84],[214,186,156],W), cabD=mixc([50,55,64],[180,150,122],W);
+  ctx.fillStyle=rgb(cab); ctx.fillRect(-1250,1010,1180,512);
+  ctx.fillStyle=rgb(mixc([84,90,102],[232,214,190],W)); ctx.fillRect(-1270,985,1220,34);   // counter top
+  ctx.strokeStyle=rgb(cabD); ctx.lineWidth=6; for(const x of [-960,-660,-360]){ctx.beginPath(); ctx.moveTo(x,1030); ctx.lineTo(x,1500); ctx.stroke();}
+  ctx.fillStyle=rgb(cab); ctx.fillRect(-1250,-130,1060,520);
+  for(const x of [-990,-720,-460]){ctx.beginPath(); ctx.moveTo(x,-110); ctx.lineTo(x,370); ctx.stroke();}
+  ctx.fillStyle=rgb(cabD); for(const x of [-1010,-740,-480,-220]){rr(x-4,320,8,40,4); ctx.fill();}
+  // fridge
+  ctx.fillStyle=rgb(mixc([82,88,100],[226,214,200],W)); rr(-1780,-80,470,1600,30); ctx.fill();
+  ctx.strokeStyle=rgb(mixc([60,64,74],[190,176,160],W)); ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(-1780,520); ctx.lineTo(-1310,520); ctx.stroke();
+  ctx.fillStyle=rgb(mixc([60,64,74],[180,164,148],W)); rr(-1370,120,14,260,7); ctx.fill(); rr(-1370,600,14,320,7); ctx.fill();
+  // window: night city -> dawn
+  drawWindow(t,c,W);
+  // a small framed picture on the wall right of the window (plain, no content)
+  ctx.fillStyle=rgb(mixc([44,48,58],[170,140,110],W)); rr(1520,380,230,290,10); ctx.fill();
+  ctx.fillStyle=rgb(mixc([70,78,92],[226,200,170],W)); rr(1542,402,186,246,6); ctx.fill();
+  // pendant lamp over the table
+  const lx=300, ly=150;
+  ctx.strokeStyle='#15171b'; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(lx,-420); ctx.lineTo(lx,ly-60); ctx.stroke();
+  ctx.fillStyle=rgb(mixc([34,38,44],[90,70,56],W)); ctx.beginPath(); ctx.moveTo(lx-22,ly-64); ctx.lineTo(lx+22,ly-64); ctx.lineTo(lx+120,ly+20); ctx.quadraticCurveTo(lx,ly+34,lx-120,ly+20); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,250,236,.95)'; ctx.beginPath(); ctx.ellipse(lx,ly+22,96,13,0,0,7); ctx.fill();
+}
+function drawWindow(t,c,W){
+  const {x0,x1,y0,y1}=WIN;
+  // frame
+  ctx.fillStyle=rgb(mixc([34,38,46],[150,120,96],W)); rr(x0-26,y0-26,x1-x0+52,y1-y0+52,10); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.rect(x0,y0,x1-x0,y1-y0); ctx.clip();
+  const s=skyCols(W); const g=ctx.createLinearGradient(0,y0,0,y1); g.addColorStop(0,rgb(s.top)); g.addColorStop(1,rgb(s.bot)); ctx.fillStyle=g; ctx.fillRect(x0,y0,x1-x0,y1-y0);
+  // the sun rising low in the window (dawn only)
+  if(W>0){const sx=1260, sy=lerp(900,720,W); const r=ctx.createRadialGradient(sx,sy,0,sx,sy,520); r.addColorStop(0,`rgba(255,246,220,${W})`); r.addColorStop(.12,`rgba(255,226,170,${.85*W})`); r.addColorStop(.45,`rgba(255,190,120,${.35*W})`); r.addColorStop(1,'rgba(255,170,100,0)'); ctx.fillStyle=r; ctx.fillRect(x0,y0,x1-x0,y1-y0);}
+  // stars at night
+  const Rs=rng(31); for(let i=0;i<22;i++){const x=x0+Rs()*(x1-x0), y=y0+Rs()*300, a=(1-W)*(.25+.5*Rs())*(.75+.25*Math.sin(t*PER(1.3)+i)); ctx.fillStyle=`rgba(230,236,255,${a})`; ctx.beginPath(); ctx.arc(x,y,1.6+Rs()*1.4,0,7); ctx.fill();}
+  // distant buildings, lit windows fading at dawn
+  const Rb=rng(12); let x=x0-40; const bc=mixc([14,18,28],[176,120,92],W);
+  while(x<x1+40){const w=50+Rb()*90, h=110+Rb()*220; ctx.fillStyle=rgb(bc); ctx.fillRect(x,y1-h,w,h);
+    for(let yy=y1-h+16;yy<y1-10;yy+=26) for(let xx=x+10;xx<x+w-12;xx+=20){ if(Rb()<.28){ctx.fillStyle=`rgba(255,214,150,${.55*(1-W)})`; ctx.fillRect(xx,yy,8,11);} }
+    x+=w+Rb()*14;}
+  ctx.restore();
+  // cross bars and sill
+  ctx.fillStyle=rgb(mixc([34,38,46],[150,120,96],W)); ctx.fillRect((x0+x1)/2-9,y0,18,y1-y0); ctx.fillRect(x0,(y0+y1)/2-60,x1-x0,16);
+  ctx.fillStyle=rgb(mixc([60,66,78],[214,190,160],W)); rr(x0-50,y1+18,x1-x0+100,30,8); ctx.fill();
+}
+// ---------------- the man ----------------
+function ik(sx,sy,hx_,hy,l1,l2,side){
+  let dx=hx_-sx, dy=hy-sy, d=Math.hypot(dx,dy); const Lm=l1+l2-1, k0=Lm-40; let dd=d>k0?Lm-40*Math.exp(-(d-k0)/40):d; dd=Math.max(dd,Math.abs(l1-l2)+1);   // soft reach limit: no snap when the arm straightens
+  const a=Math.atan2(dy,dx), c=clamp((l1*l1+dd*dd-l2*l2)/(2*l1*dd),-1,1), b=Math.acos(c);
+  const ang=a+side*b; return [sx+Math.cos(ang)*l1, sy+Math.sin(ang)*l1];
+}
+const CALC={x:130,y:1140};
+const HIP=[720,1225];
+function qpt(A,C,B,u){const m=1-u;return [m*m*A[0]+2*m*u*C[0]+u*u*B[0], m*m*A[1]+2*m*u*C[1]+u*u*B[1]];}
+function qtan(A,C,B,u){const m=1-u;const x=2*m*(C[0]-A[0])+2*u*(B[0]-C[0]), y=2*m*(C[1]-A[1])+2*u*(B[1]-C[1]); const l=Math.hypot(x,y)||1; return [x/l,y/l];}
+const TH=110;   // half thickness of his torso
+// ---- body: a three-segment spine (pelvis, lumbar, thoracic) with real side-profile thickness ----
+const dirA=a=>[-Math.sin(a),-Math.cos(a)];
+const BACKO=[[0,112],[.25,90],[.45,82],[.72,100],[.9,98],[1,84]];   // spine -> back surface
+const FRONTO=[[0,96],[.28,90],[.5,84],[.74,108],[.9,96],[1,70]];   // spine -> front surface (belly, chest)
+const pw=(tab,u)=>{for(let i=0;i<tab.length-1;i++){const a=tab[i],b=tab[i+1]; if(u<=b[0]){const k=sm((u-a[0])/(b[0]-a[0])); return lerp(a[1],b[1],k);}} return tab[tab.length-1][1];};
+function spinePts(P){
+  // Catmull-Rom through the four joints, sampled evenly
+  const Q=[[2*P[0][0]-P[1][0],2*P[0][1]-P[1][1]],...P,[2*P[3][0]-P[2][0],2*P[3][1]-P[2][1]]]; const out=[];
+  for(let s=0;s<3;s++){const p0=Q[s],p1=Q[s+1],p2=Q[s+2],p3=Q[s+3];
+    for(let k=0;k<12;k++){const u=k/12,u2=u*u,u3=u2*u; const f=(a,b,c,d)=>.5*((2*b)+(-a+c)*u+(2*a-5*b+4*c-d)*u2+(-a+3*b-3*c+d)*u3);
+      out.push([f(p0[0],p1[0],p2[0],p3[0]),f(p0[1],p1[1],p2[1],p3[1])]);}}
+  out.push(P[3]); return out;
+}
+function pose(t){
+  const st_=tv('stretch',t); const f=tv('lean',t)-.14*st_+.045*Math.sin(2*Math.PI*(t-30.0)/2.6)*ss(30,30.8,t)*(1-ss(RESET-1.2,RESET-.3,t)), p=tv('pitch',t)-.12*st_, br=breath(t), W=tv('W',t);
+  const fp=Math.max(f,0), fn=Math.min(f,0);
+  const exhale=bell(EXH[0],EXH[1],t);
+  const a0=.06+.25*fp+.5*fn, a1=a0+.30*fp+.08*fn, a2=a1+.55*fp-exhale*.04;
+  const H=HIP; const P1=[H[0]+120*dirA(a0)[0],H[1]+120*dirA(a0)[1]];
+  const P2=[P1[0]+140*dirA(a1)[0],P1[1]+140*dirA(a1)[1]];
+  const L3=150-br*lerp(2.5,1.8,W);
+  const P3=[P2[0]+L3*dirA(a2)[0],P2[1]+L3*dirA(a2)[1]];
+  const pts=spinePts([H,P1,P2,P3]); const N=pts.length;
+  // back normal at each sample
+  const nb0=[Math.cos(a1),-Math.sin(a1)];
+  const back=[],front=[];
+  for(let i=0;i<N;i++){const a=pts[Math.max(0,i-1)], b=pts[Math.min(N-1,i+1)]; let tx=b[0]-a[0], ty=b[1]-a[1]; const l=Math.hypot(tx,ty)||1; tx/=l; ty/=l;
+    let nx=-ty, ny=tx; if(nx*nb0[0]+ny*nb0[1]<0){nx=-nx;ny=-ny;}
+    const u=i/(N-1), bo=pw(BACKO,u)+(u>.6&&u<.95?br*1.5:0), fo=pw(FRONTO,u)+(u>.6&&u<.9?br*2.5:0);
+    back.push([pts[i][0]+nx*bo,pts[i][1]+ny*bo]); front.push([pts[i][0]-nx*fo,pts[i][1]-ny*fo]);}
+  const d3=dirA(a2), n3=[Math.cos(a2),-Math.sin(a2)];
+  const S=[P3[0]+n3[0]*8-d3[0]*40, P3[1]+n3[1]*8-d3[1]*40];      // shoulder joint
+  const NB=[P3[0]-n3[0]*22+d3[0]*14, P3[1]-n3[1]*22+d3[1]*14];   // base of the neck
+  let an=a2+.28+.32*Math.max(p,0)+.35*Math.min(p,0); an=lerp(an,.32,tv('neckUp',t));
+  const hc=[NB[0]+150*dirA(an)[0], NB[1]+150*dirA(an)[1]];
+  const hrot=-(an-.36)*.8, hs=1;
+  // the highest point of his back: where the bills rest
+  // soft highest point (continuous in the pose, so the stack never hops between contour points)
+  let top, ang; {const i0=Math.floor(N*.3); let ym=1e9; for(let i=i0;i<N;i++) ym=Math.min(ym,back[i][1]);
+    let sw=0,sx=0,sy=0,tx=0,ty=0; for(let i=i0;i<N;i++){const w=Math.exp(-(back[i][1]-ym)/6); sw+=w; sx+=w*back[i][0]; sy+=w*back[i][1];
+      const qa=back[Math.max(0,i-1)], qb=back[Math.min(N-1,i+1)]; const dx=qb[0]-qa[0], dy=qb[1]-qa[1], l=Math.hypot(dx,dy)||1; tx+=w*dx/l; ty+=w*dy/l;}
+    top=[sx/sw, sy/sw-1.5]; ang=Math.atan2(ty,tx);}
+  ang=Math.atan2(Math.sin(ang),Math.cos(ang)); if(ang>Math.PI/2) ang-=Math.PI; if(ang<-Math.PI/2) ang+=Math.PI;
+  // ---- hands ----
+  const wr=tv('write',t), cal=tv('calc',t), arms=tv('arms',t), push=tv('push',t), dua=tv('dua',t), rest=tv('rest',t), flip=tv('flip',t);
+  const scr=wr*(1-ss(T1,T1+.15,t)*(1-ss(WR2,WR2+.2,t)));
+  let hn=[320+Math.sin(t*PER(7.3))*7*scr+Math.sin(t*PER(2.1))*12*scr, 1160+Math.sin(t*PER(11.1))*3*scr];
+  let hf=[CALC.x+50, CALC.y+48+tapDip(t)*8];
+  const aN=[175,1192], aF=[215,1128], pN=[360,1212], pF=[330,1130];
+  const AN=[lerp(aN[0],pN[0],push),lerp(aN[1],pN[1],push)], AF=[lerp(aF[0],pF[0],push),lerp(aF[1],pF[1],push)];
+  hn=[lerp(hn[0],AN[0],arms),lerp(hn[1],AN[1],arms)]; hf=[lerp(hf[0],AF[0],arms),lerp(hf[1],AF[1],arms)];
+  const cpos=calcHand(t,flip); hf=[lerp(hf[0],cpos[0],cal*arms),lerp(hf[1],cpos[1],cal*arms)];
+  const up=ss(UPR[0],UPR[1],t);
+  const dS=S; const dN=[lerp(dS[0]-335,470,up),lerp(dS[1]+70,1040,up)], dF=[lerp(dS[0]-262,505,up),lerp(dS[1]+28,1010,up)];
+  hn=[lerp(hn[0],dN[0],dua),lerp(hn[1],dN[1],dua)]; hf=[lerp(hf[0],dF[0],dua),lerp(hf[1],dF[1],dua)];
+  hn=[lerp(hn[0],470,rest),lerp(hn[1],1212,rest)]; hf=[lerp(hf[0],430,rest),lerp(hf[1],1150,rest)];
+  // relief: a big stretch with both arms over his head, then his left hand settles on his heart
+  const stv=tv('stretch',t), hrt=tv('heart',t);
+  hn=[lerp(hn[0],hc[0]-100,stv),lerp(hn[1],hc[1]-205,stv)]; hf=[lerp(hf[0],hc[0]+45,stv),lerp(hf[1],hc[1]-222,stv)];
+  {const ch=front[Math.round(.8*(N-1))]; hn=[lerp(hn[0],ch[0]+22,hrt),lerp(hn[1],ch[1]+18,hrt)];}
+  const hump=ss(.25,.6,fp);
+  return {t,f,p,H,P1,P2,P3,pts,back,front,S,NB,a2,n:n3,hc,hrot,hs,hn,hf,W,dua,rest,arms,cal,flip,wr,scr,top,ang,hump,up,
+    hl:hf, hr:hn, cx:top[0], humpTop:top[1], turn:0};
+}
+function calcHand(t,flip){const lift=Math.sin(Math.PI*flip); return [CALC.x+50, CALC.y+48-lift*70+tapDip(t)*8];}
+function drawChair(t,s){
+  ctx.fillStyle=fc(P.chair);
+  rr(900,770,34,560,12); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.05)'; rr(904,778,8,540,4); ctx.fill();
+  ctx.fillStyle=fc(P.chair); rr(630,1328,330,26,10); ctx.fill(); rr(645,1350,24,760,10); ctx.fill(); rr(905,1350,24,760,10); ctx.fill();
+}
+function limb(a,b,wa,wb,col){
+  const dx=b[0]-a[0], dy=b[1]-a[1], l=Math.hypot(dx,dy)||1, nx=-dy/l, ny=dx/l;
+  ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo(a[0]+nx*wa/2,a[1]+ny*wa/2); ctx.lineTo(b[0]+nx*wb/2,b[1]+ny*wb/2); ctx.lineTo(b[0]-nx*wb/2,b[1]-ny*wb/2); ctx.lineTo(a[0]-nx*wa/2,a[1]-ny*wa/2); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.arc(a[0],a[1],wa/2,0,7); ctx.fill(); ctx.beginPath(); ctx.arc(b[0],b[1],wb/2,0,7); ctx.fill();
+}
+const HIPJ=()=>[HIP[0]-30,HIP[1]+50], KNEE=[470,1300], ANK=[462,2000];
+function drawLegs(s){
+  limb(HIPJ(),KNEE,150,118,fc(mixc(P.pants,[0,0,0],.2)));      // far thigh, behind
+  limb(KNEE,ANK,104,80,fc(P.pants));
+  ctx.fillStyle='#1a1c21'; rr(330,1972,190,78,34); ctx.fill();
+}
+function drawLap(s){
+  limb(HIPJ(),[KNEE[0]+10,KNEE[1]+8],156,122,fc(P.pants));     // near thigh in front of the hip
+  ctx.fillStyle='rgba(255,255,255,.05)'; ctx.beginPath(); ctx.moveTo(HIPJ()[0],HIPJ()[1]-70); ctx.lineTo(KNEE[0],KNEE[1]-55); ctx.lineTo(KNEE[0],KNEE[1]-44); ctx.lineTo(HIPJ()[0],HIPJ()[1]-58); ctx.fill();
+}
+function torsoOutline(s){
+  const {back,front,P3,P0}=s, N=back.length, d3=dirA(s.a2), d0=dirA(.06);
+  ctx.beginPath(); ctx.moveTo(front[0][0],front[0][1]);
+  for(let i=1;i<N;i++) ctx.lineTo(front[i][0],front[i][1]);
+  // over the top of the shoulder
+  ctx.quadraticCurveTo(P3[0]+d3[0]*70,P3[1]+d3[1]*70,back[N-1][0],back[N-1][1]);
+  for(let i=N-2;i>=0;i--) ctx.lineTo(back[i][0],back[i][1]);
+  // under the seat of the trousers
+  ctx.quadraticCurveTo(HIP[0]+30,HIP[1]+130,front[0][0],front[0][1]); ctx.closePath();
+}
+function drawTorso(s){
+  // shirt
+  torsoOutline(s); ctx.fillStyle=fc(P.shirt); ctx.fill();
+  ctx.save(); torsoOutline(s); ctx.clip();
+  // trousers from the waist down
+  ctx.fillStyle=fc(P.pants); const N=s.back.length, iw=Math.round(N*.13);
+  ctx.beginPath(); ctx.moveTo(s.front[iw][0]-30,s.front[iw][1]+4); ctx.lineTo(s.back[iw][0]+40,s.back[iw][1]+4); ctx.lineTo(HIP[0]+300,HIP[1]+300); ctx.lineTo(HIP[0]-300,HIP[1]+300); ctx.closePath(); ctx.fill();
+  // lamp light across the top of the back, shade on the front
+  ctx.lineJoin='round'; ctx.strokeStyle=fc(P.shirtL,.6); ctx.lineWidth=46; ctx.beginPath(); for(let i=Math.floor(N*.35);i<N;i++){const q=s.back[i]; const pp=s.pts[i]; const k=.8; const x=lerp(pp[0],q[0],k), y=lerp(pp[1],q[1],k); i===Math.floor(N*.35)?ctx.moveTo(x,y):ctx.lineTo(x,y);} ctx.stroke();
+  ctx.strokeStyle='rgba(0,0,0,.14)'; ctx.lineWidth=60; ctx.beginPath(); for(let i=0;i<N;i++){const q=s.front[i]; i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]);} ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle=fc(P.shirtD,.7); ctx.lineWidth=4; torsoOutline(s); ctx.stroke();
+}
+function drawNeck(s){
+  const a=[s.NB[0],s.NB[1]], b=[lerp(s.NB[0],s.hc[0],.6),lerp(s.NB[1],s.hc[1],.6)];
+  limb(a,b,92,84,fc(P.skinD));
+  // collar
+  ctx.strokeStyle=fc(P.shirtD); ctx.lineWidth=14; ctx.lineCap='round'; const n=s.n, d=dirA(s.a2);
+  ctx.beginPath(); ctx.moveTo(s.NB[0]+n[0]*46-d[0]*8,s.NB[1]+n[1]*46-d[1]*8); ctx.quadraticCurveTo(s.NB[0]-d[0]*24,s.NB[1]-d[1]*24,s.NB[0]-n[0]*44-d[0]*6,s.NB[1]-n[1]*44-d[1]*6); ctx.stroke();
+}
+function shoulderPt(s,near){return near?[s.S[0]-6,s.S[1]+10]:[s.S[0]+10,s.S[1]-8];}
+const UA=205, FA=195;
+function elbowOf(s,near){const sh=shoulderPt(s,near), h=near?s.hn:s.hf; return ik(sh[0],sh[1],h[0],h[1],UA,FA,-1);}
+// a limb with real muscle shape: half-widths on each side along its length (biceps, forearm muscles, a narrow wrist)
+function muscle(a,b,prof,col,grow=0){
+  const dx=b[0]-a[0], dy=b[1]-a[1], l=Math.hypot(dx,dy)||1, ux=dx/l, uy=dy/l, nx=-uy, ny=ux; const L=[],R=[];
+  for(let i=0;i<=16;i++){const u=i/16; let k=0; while(k<prof.length-2&&u>prof[k+1][0]) k++; const p0=prof[k],p1=prof[k+1]; const w=sm(clamp((u-p0[0])/(p1[0]-p0[0])));
+    const wl=lerp(p0[1],p1[1],w)+grow, wr=lerp(p0[2],p1[2],w)+grow; const x=a[0]+dx*u, y=a[1]+dy*u; L.push([x+nx*wl,y+ny*wl]); R.push([x-nx*wr,y-ny*wr]);}
+  const pts=L.concat(R.reverse()); ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo((pts[0][0]+pts[1][0])/2,(pts[0][1]+pts[1][1])/2);
+  for(let i=1;i<=pts.length;i++){const p=pts[i%pts.length], q=pts[(i+1)%pts.length]; ctx.quadraticCurveTo(p[0],p[1],(p[0]+q[0])/2,(p[1]+q[1])/2);} ctx.fill();
+  const r0=(prof[0][1]+prof[0][2])/2+grow, r1=(prof[prof.length-1][1]+prof[prof.length-1][2])/2+grow; ctx.beginPath(); ctx.arc(a[0],a[1],r0,0,7); ctx.fill(); ctx.beginPath(); ctx.arc(b[0],b[1],r1,0,7); ctx.fill();
+}
+const FORE=[[0,23,23],[.2,28,25],[.5,23,20.5],[.82,18.5,17.5],[1,18,17]];     // elbow, forearm muscles, wrist
+const UPPER=[[0,30,30],[.4,33,29],[.75,28,25],[1,25,24]];                     // shoulder, biceps, elbow
+function drawArm(s,near){
+  const sh=shoulderPt(s,near); const e=elbowOf(s,near);
+  const dk=near?0:.18;
+  const sk=fc(mixc(P.skin,[60,40,30],dk)), skd=fc(mixc(P.skinD,[60,40,30],dk)), skl=mixc(P.skin,[60,40,30],dk);
+  const [wx,wy]=handWrist(s,near), w=[wx,wy];
+  muscle(sh,e,UPPER,skd,2.5); muscle(e,w,FORE,skd,2.5);
+  muscle(sh,e,UPPER,sk); muscle(e,w,FORE,sk);
+  // light from the lamp along the top of the forearm, and the elbow's soft crease
+  {const dx=w[0]-e[0], dy=w[1]-e[1], l=Math.hypot(dx,dy)||1, nx=-dy/l, ny=dx/l; const up=ny<0?1:-1;
+   ctx.strokeStyle=fc(mixc(skl,[255,236,214],.35),.5); ctx.lineWidth=5; ctx.lineCap='round'; ctx.beginPath();
+   ctx.moveTo(e[0]+dx*.15+nx*up*15,e[1]+dy*.15+ny*up*15); ctx.quadraticCurveTo(e[0]+dx*.4+nx*up*18,e[1]+dy*.4+ny*up*18,e[0]+dx*.8+nx*up*11,e[1]+dy*.8+ny*up*11); ctx.stroke();
+   ctx.strokeStyle=fc(P.skinD,.55); ctx.lineWidth=2; ctx.beginPath(); ctx.arc(e[0],e[1],13,Math.atan2(dy,dx)+1.9,Math.atan2(dy,dx)+2.9); ctx.stroke();}
+  // the T-shirt sleeve over the upper arm: a hem and two soft folds
+  const m=[lerp(sh[0],e[0],.56),lerp(sh[1],e[1],.56)]; const scol=near?P.shirt:P.shirtD;
+  limb(sh,m,96,84,fc(mixc(scol,[0,0,0],.12))); limb(sh,m,92,80,fc(scol));
+  const dx=e[0]-sh[0], dy=e[1]-sh[1], l=Math.hypot(dx,dy)||1, ux=dx/l, uy=dy/l;
+  ctx.strokeStyle=fc(P.shirtD,.85); ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(m[0]+uy*41,m[1]-ux*41); ctx.quadraticCurveTo(m[0]+ux*7,m[1]+uy*7,m[0]-uy*41,m[1]+ux*41); ctx.stroke();
+  ctx.strokeStyle=fc(mixc(scol,[0,0,0],.25),.5); ctx.lineWidth=3;
+  for(const [o,k] of [[-.35,18],[.15,-22]]){const c=[lerp(sh[0],m[0],.5+o*.4),lerp(sh[1],m[1],.5+o*.4)]; ctx.beginPath(); ctx.moveTo(c[0]+uy*k,c[1]-ux*k); ctx.quadraticCurveTo(c[0]+ux*20+uy*k*.4,c[1]+uy*20-ux*k*.4,c[0]+ux*34,c[1]+uy*34); ctx.stroke();}
+  return e;
+}
+function drawHand(h,a=1,near=true,s){
+  // a relaxed hand lying along the forearm direction
+  if(a<=.005) return; const e=s?elbowOf(s,near):[h[0]+100,h[1]]; const ang=Math.atan2(h[1]-e[1],h[0]-e[0]);
+  ctx.save(); ctx.globalAlpha=a; ctx.translate(h[0],h[1]); ctx.rotate(ang);
+  const dk=near?0:.18; ctx.fillStyle=fc(mixc(P.skin,[60,40,30],dk));
+  ctx.beginPath(); ctx.ellipse(6,0,40,27,0,0,7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-4,-20,20,11,-.6,0,7); ctx.fill();   // thumb
+  ctx.strokeStyle=fc(mixc(P.skinD,[60,40,30],dk)); ctx.lineWidth=4; ctx.lineCap='round'; for(const y of [-6,4,13]){ctx.beginPath(); ctx.moveTo(30,y); ctx.lineTo(42,y*.9); ctx.stroke();}
+  ctx.restore();
+}
+// ---- real hands: a palm, four fingers and a thumb; fingers curl, spread and open with a soft spring ----
+function openSpring(x){if(x<=0) return 0; return 1-Math.exp(-6.5*x)*(Math.cos(7.5*x)+.55*Math.sin(7.5*x));}
+function fingerOpen(t,i){return openSpring(t-(DUA_OPEN+i*.075));}
+function angLerp(a,b,u){let d=b-a; while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI; return a+d*u;}
+function handParams(s,near,t){
+  const e=elbowOf(s,near), h=near?s.hn:s.hf; const th=Math.atan2(h[1]-e[1],h[0]-e[0]);
+  const pen=near?s.wr*(1-s.arms):0, onCalc=near?0:clamp(s.cal*(s.arms)+(1-s.arms)*(1-s.wr*0));
+  let curl=lerp(.42,.5,s.arms); curl=lerp(curl,.85,pen); if(!near) curl=lerp(curl,.12,clamp((1-s.arms)+s.cal*s.arms)); curl=lerp(curl,.12,s.arms*tv('push',t)); curl=lerp(curl,.45,s.rest);
+  const opens=[0,1,2,3].map(i=>fingerOpen(t,i)), thO=openSpring(t-DUA_OPEN+.05);
+  const st_=tv('stretch',t), ht_=near?tv('heart',t):0;
+  const curls=[0,1,2,3].map(i=>lerp(lerp(lerp(curl,lerp(.95,.18,opens[i]),s.dua),.04,st_),.2,ht_));
+  const tcurl=lerp(lerp(.3,.6,pen),lerp(.9,.15,thO),s.dua);
+  const dir=angLerp(th,Math.PI+1.0+(near?0:.12),s.dua);
+  const up=lerp(-1,1,s.dua);    // fingers bend toward the palm: down on the table, up when the palms face the sky
+  const spread=lerp(lerp(.25,lerp(.2,1,opens[1]),s.dua),1,st_);
+  const tap=(!near?tapDip(t)*(1-s.dua):0);
+  return {h,dir,curls,tcurl,up,spread,palm:s.dua,tap};
+}
+function capsule(a,b,w,col){ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();}
+function drawRealHand(s,near,t,alpha=1){
+  if(alpha<=.005) return; const q=handParams(s,near,t); const dk=near?0:.2;
+  const sk=fc(mixc(P.skin,[60,40,30],dk)), skd=fc(mixc(P.skinD,[60,40,30],dk)), line=fc(mixc(P.skinD,[90,50,30],.25+dk));
+  ctx.save(); ctx.globalAlpha=alpha; ctx.translate(q.h[0],q.h[1]); ctx.rotate(q.dir); ctx.scale(1.28,1.28);
+  // local frame: +x along the fingers, +y across the hand (the side the fingers curl toward is -y*up)
+  const fl=[48,54,51,42], off=[-19,-6,7,19], spr=[-.16,-.05,.05,.15];
+  const fingers=[];
+  for(let i=0;i<4;i++){let a=spr[i]*q.spread, p=[30,off[i]]; const segs=[fl[i]*.44,fl[i]*.32,fl[i]*.24]; const pts=[p];
+    for(let k=0;k<3;k++){a+= q.up*q.curls[i]*(k===0?.75:.62); const tapd=(i===0&&k===0)?q.tap*.5:0; a+=tapd; p=[p[0]+Math.cos(a)*segs[k], p[1]+Math.sin(a)*segs[k]]; pts.push(p);}
+    fingers.push(pts);}
+  // far fingers first (the side away from us is +y when the palm is up)
+  const order=q.up>0?[3,2,1,0]:[0,1,2,3];
+  const drawF=(i,w,c)=>{const pts=fingers[i]; ctx.strokeStyle=c; ctx.lineWidth=w; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]); for(const p of pts.slice(1)) ctx.lineTo(p[0],p[1]); ctx.stroke();};
+  for(const i of order) drawF(i,21,skd);
+  for(const i of order) drawF(i,16,sk);
+  // palm
+  ctx.fillStyle=skd; ctx.beginPath(); ctx.ellipse(12,0,38,31,0,0,7); ctx.fill();
+  ctx.fillStyle=sk; ctx.beginPath(); ctx.ellipse(12,0,35,28,0,0,7); ctx.fill();
+  // palm lines when it faces the sky; knuckles otherwise
+  if(q.palm>.05){ctx.globalAlpha=alpha*q.palm*.55; ctx.strokeStyle=line; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(-8,-12); ctx.quadraticCurveTo(14,-2,36,-14); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-6,6); ctx.quadraticCurveTo(16,2,34,10); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-14,-18); ctx.quadraticCurveTo(-4,4,-14,22); ctx.stroke(); ctx.globalAlpha=alpha;}
+  if(q.palm<.95){ctx.globalAlpha=alpha*(1-q.palm); ctx.fillStyle=skd; for(const y of off){ctx.beginPath(); ctx.arc(34,y,4,0,7); ctx.fill();} ctx.globalAlpha=alpha;}
+  // thumb from the base of the palm
+  {let a, p=[-2,q.up>0?24:-24]; if(q.up>0) a=.9-.5*q.tcurl; else a=-.9+.5*q.tcurl; const pts=[p];
+    for(const L of [24,20]){p=[p[0]+Math.cos(a)*L,p[1]+Math.sin(a)*L]; pts.push(p); a+=(q.up>0?-1:1)*q.tcurl*.5;}
+    ctx.strokeStyle=skd; ctx.lineWidth=23; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]); ctx.lineTo(pts[1][0],pts[1][1]); ctx.lineTo(pts[2][0],pts[2][1]); ctx.stroke();
+    ctx.strokeStyle=sk; ctx.lineWidth=18; ctx.stroke();}
+  ctx.restore();
+}
+function drawPen(s){
+  const a=s.wr*(1-s.arms); if(a<=.01) return; const h=s.hn;
+  ctx.save(); ctx.globalAlpha=a; ctx.lineCap='round';
+  ctx.strokeStyle='#1d2a44'; ctx.lineWidth=11; ctx.beginPath(); ctx.moveTo(h[0]-34,h[1]+18); ctx.lineTo(h[0]+30,h[1]-66); ctx.stroke();
+  ctx.strokeStyle='#c9ced6'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(h[0]-34,h[1]+18); ctx.lineTo(h[0]-41,h[1]+28); ctx.stroke();
+  ctx.restore();
+}
+function drawDuaHands(s){
+  const a=s.dua; if(a<=.005) return; ctx.save(); ctx.globalAlpha=clamp(a*1.6);
+  for(const [h,near] of [[s.hf,false],[s.hn,true]]){const x=h[0], y=h[1];
+    const sk=near?P.skin:mixc(P.skin,[60,40,30],.18);
+    ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(x,y+6,66,46,-.12,0,Math.PI); ctx.fill();
+    ctx.fillStyle=fc(sk); ctx.beginPath(); ctx.ellipse(x,y,64,40,-.12,0,Math.PI); ctx.fill();
+    ctx.strokeStyle=fc(P.skinD); ctx.lineWidth=4; for(let k=0;k<3;k++){ctx.beginPath(); ctx.arc(x+(k*18-18),y+4,14,Math.PI*.15,Math.PI*.85); ctx.stroke();}}
+  ctx.restore();
+}
+// his head in three-quarter view, facing left (toward the table)
+// ---- tears: wet red-rimmed eyes, a drop that wells on the lower lid, runs down the cheek into his beard, and a trail that slowly dries ----
+const TEARS=[[8.2,0],[11.95,0],[12.65,1],[16.1,0],[19.7,1]];
+const EYES=[[-42,28],[-118,17]];
+function wetness(t){return t>=RESET?0:Math.max(ss(7.4,9.0,t)*.6,ss(11.2,11.9,t))*(1-ss(23.5,25.5,t));}
+function drawTears(t,fy,lid,sq){
+  const wet=wetness(t); const ey=-8+fy, ry=34*sq;
+  if(wet>0) for(const [x,rx] of EYES){
+    const top=ey-36*sq, cover=lid*70*sq, lidLine=top+cover;
+    ctx.lineCap='round';
+    ctx.strokeStyle=`rgba(200,92,88,${.5*wet})`; ctx.lineWidth=4.5; ctx.beginPath(); ctx.ellipse(x,ey+2,rx+3.5,ry+3.5,0,Math.PI*.12,Math.PI*.88); ctx.stroke();      // sore red rims
+    ctx.strokeStyle=`rgba(210,232,255,${.55*wet})`; ctx.lineWidth=6.5; ctx.beginPath(); ctx.ellipse(x,ey,rx*.9,ry*.9,0,Math.PI*.18,Math.PI*.82); ctx.stroke();       // water pooled on the lower lid
+    ctx.strokeStyle=`rgba(255,255,255,${.8*wet})`; ctx.lineWidth=1.6; ctx.beginPath(); ctx.ellipse(x,ey-2,rx*.86,ry*.86,0,Math.PI*.25,Math.PI*.7); ctx.stroke();
+    const lx=-6+tv('lookX',t)*5, ly=tv('lookY',t)*11*sq; const gy=ey+ly+9;
+    if(gy>lidLine+4){ctx.fillStyle=`rgba(255,255,255,${.85*wet})`; ctx.beginPath(); ctx.arc(x+lx+7*(rx/28),gy,2.6*(rx/28)+.8,0,7); ctx.fill();               // glassy second glint
+      ctx.strokeStyle=`rgba(255,255,255,${.35*wet})`; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(x+lx,ey+ly+3,rx*.5,Math.PI*.15,Math.PI*.55); ctx.stroke();}
+  }
+  if(t>=RESET) return;
+  for(const [t0,e] of TEARS){const d=t-t0; if(d<0||d>8) continue; const [x,rx]=EYES[e]; const k=e?.7:1;
+    const x0=x-rx*.5, y0=ey+ry*.86, yB=62+fy+(e?6:10);              // lower lid, then where the beard begins
+    const well=ss(0,.7,d), u=clamp((d-.7)/1.25), mv=u<1?1-Math.pow(1-u,1.7):1; const yy=lerp(y0,yB,mv), xx=x0-mv*4*k+Math.sin(mv*6)*1.2;
+    const speed=u>0&&u<1?1.7*Math.pow(1-u,.7):0; const gone=ss(1.95,2.25,d); const r=(2+3.8*well)*k*(1-gone);
+    // the trail: wet skin catching the light, drying over a few seconds
+    if(d>.7){const ta=Math.exp(-Math.max(0,d-2)/2.4)*(1-ss(23.5,25.5,t)); ctx.lineCap='round';
+      ctx.strokeStyle=`rgba(205,228,255,${.38*ta})`; ctx.lineWidth=3.6*k; ctx.beginPath(); ctx.moveTo(x0,y0); ctx.quadraticCurveTo(x0-1,(y0+yy)/2,xx,yy); ctx.stroke();
+      ctx.strokeStyle=`rgba(255,255,255,${.55*ta})`; ctx.lineWidth=1.1; ctx.beginPath(); ctx.moveTo(x0-1.4,y0+2); ctx.quadraticCurveTo(x0-2.4,(y0+yy)/2,xx-1.6,yy-2); ctx.stroke();}
+    if(r>.3){const rY=r*(1+.55*speed);
+      ctx.fillStyle='rgba(140,80,60,.22)'; ctx.beginPath(); ctx.ellipse(xx+1.2,yy+1.6,r*1.05,rY*1.05,0,0,7); ctx.fill();         // the skin darkens under the drop
+      ctx.fillStyle='rgba(214,234,255,.62)'; ctx.beginPath(); ctx.moveTo(xx,yy-rY*1.9); ctx.quadraticCurveTo(xx+r*1.15,yy-rY*.2,xx,yy+rY); ctx.quadraticCurveTo(xx-r*1.15,yy-rY*.2,xx,yy-rY*1.9); ctx.fill();
+      ctx.strokeStyle='rgba(120,150,190,.35)'; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle='rgba(255,255,255,.95)'; ctx.beginPath(); ctx.arc(xx-r*.35,yy-rY*.35,Math.max(.8,r*.3),0,7); ctx.fill();                // highlight
+      ctx.strokeStyle='rgba(255,255,255,.55)'; ctx.lineWidth=1.1; ctx.beginPath(); ctx.arc(xx,yy,r*.7,Math.PI*.2,Math.PI*.8); ctx.stroke();}  // light through the drop
+  }
+}
+// ---- his voice: the mouth moves softly while he says the dhikr ----
+function talk(t){let m=.85*bell(27.6,29.4,t); for(const D of DHIKR){const u=t-D; if(u<0||u>1.9) continue; m=Math.max(m,bell(0,1.9,u)*(.45+.55*Math.abs(Math.sin(Math.PI*3.6*u))));} return m;}
+function mouthWorld(s,t){const fy=Math.max(s.p,0)*18, a=s.hrot+tv('roll',t), lx=-104, ly=92+fy; return [s.hc[0]+(lx*Math.cos(a)-ly*Math.sin(a))*s.hs, s.hc[1]+(lx*Math.sin(a)+ly*Math.cos(a))*s.hs];}
+function drawHead(s,t){
+  const {hc,hrot,hs,p}=s; ctx.save(); ctx.translate(hc[0],hc[1]); ctx.rotate(hrot+tv('roll',t)); ctx.scale(hs,hs);
+  const fy=Math.max(p,0)*18;
+  // ear (the near one, toward the back of his head)
+  ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(70,14,27,37,0,0,7); ctx.fill(); ctx.fillStyle=fc(mixc(P.skinD,[90,50,30],.3)); ctx.beginPath(); ctx.ellipse(72,16,12,20,0,0,7); ctx.fill();
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill();
+  // ear drawn over the face edge
+  ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(70,14,25,35,0,0,7); ctx.fill(); ctx.fillStyle=fc(mixc(P.skinD,[90,50,30],.3)); ctx.beginPath(); ctx.ellipse(73,16,11,19,0,0,7); ctx.fill();
+  const sg=ctx.createRadialGradient(-70,-50,20,0,0,160); sg.addColorStop(0,'rgba(255,255,255,.08)'); sg.addColorStop(1,'rgba(120,60,30,.18)'); ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.arc(0,0,151,0,7); ctx.clip();
+  // short hair: the crown and the back of the head
+  ctx.fillStyle=fc(P.hair); ctx.beginPath(); ctx.moveTo(-160,-58); ctx.quadraticCurveTo(-120,-112,-30,-104); ctx.quadraticCurveTo(40,-98,52,-50); ctx.quadraticCurveTo(46,-10,48,30);
+  ctx.quadraticCurveTo(110,40,118,90); ctx.lineTo(170,90); ctx.lineTo(170,-200); ctx.lineTo(-170,-200); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  // re-draw the ear over the hair edge
+  ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(70,14,25,35,0,0,7); ctx.fill(); ctx.fillStyle=fc(mixc(P.skinD,[90,50,30],.3)); ctx.beginPath(); ctx.ellipse(73,16,11,19,0,0,7); ctx.fill();
+  // nose: past the edge of the face
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.ellipse(-150,26+fy,22,24,0,0,7); ctx.fill(); ctx.fillStyle=fc(P.skinD,.7); ctx.beginPath(); ctx.ellipse(-140,38+fy,9,6,0,0,7); ctx.fill();
+  // eyes (the far one narrower)
+  const lid=clamp(Math.max(tv('lid',t),blink(t))), sad=tv('brow',t), sq=1-Math.max(p,0)*.18;
+  for(const [x,rx,far] of [[-118,17,true],[-42,28,false]]){const ey=-8+fy;
+    ctx.fillStyle='#fbf7f2'; ctx.beginPath(); ctx.ellipse(x,ey,rx,34*sq,0,0,7); ctx.fill();
+    const lx=-6+tv('lookX',t)*5, ly=tv('lookY',t)*11*sq;
+    ctx.fillStyle='#1c130e'; ctx.beginPath(); ctx.ellipse(x+lx*(far?.6:1),ey+ly+3,rx*.66,22*sq,0,0,7); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(x+lx-6*(rx/28),ey+ly-7,5*(rx/28)+1,0,7); ctx.fill();
+    const top=ey-36*sq, cover=lid*70*sq, sd=far?-1:1;
+    ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.moveTo(x-rx-6,top-4); ctx.lineTo(x+rx+6,top-4);
+    ctx.lineTo(x+rx+6,top+cover+sad*7); ctx.quadraticCurveTo(x,top+cover+8*(1-lid),x-rx-6,top+cover-sad*4); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='#2a1a12'; ctx.lineWidth=5; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(x-rx,top+cover-sad*4+2); ctx.quadraticCurveTo(x,top+cover+8*(1-lid)+3,x+rx,top+cover+sad*6+2); ctx.stroke();
+    const by=ey-60*sq-(1-lid)*4; ctx.strokeStyle=fc(P.hair); ctx.lineWidth=14;
+    const li=far?sad*7:-sad*12, ri=far?-sad*12:sad*7; ctx.beginPath(); ctx.moveTo(x-rx,by+li); ctx.quadraticCurveTo(x,by-6-sad*3,x+rx,by+ri); ctx.stroke();
+  }
+  drawTears(t,fy,lid,sq);
+  // beard from the ear around the jaw and chin
+  ctx.fillStyle=fc(P.beard); ctx.beginPath(); ctx.moveTo(52,0); ctx.quadraticCurveTo(108,40,96,96); ctx.quadraticCurveTo(70,170,-40,186+fy*.5); ctx.quadraticCurveTo(-140,180,-156,92+fy*.5);
+  ctx.lineTo(-150,62+fy); ctx.quadraticCurveTo(-110,82+fy,-70,74+fy); ctx.quadraticCurveTo(-10,64+fy,20,40); ctx.quadraticCurveTo(36,14,40,-2); ctx.closePath(); ctx.fill();
+  // mustache and mouth
+  ctx.fillStyle=fc(P.beard); ctx.beginPath(); ctx.ellipse(-104,62+fy,46,15,-.05,0,7); ctx.fill();
+  const tk=talk(t); if(tk>.02){ctx.fillStyle=`rgba(60,20,16,${Math.min(1,tk*3)})`; ctx.beginPath(); ctx.ellipse(-104,93+fy,15,2+9*tk,0,0,7); ctx.fill(); ctx.fillStyle=`rgba(220,200,190,${.5*Math.min(1,tk*3)})`; ctx.fillRect(-114,93+fy-(2+9*tk)*.8,20,3*tk);}
+  const sm_=tv('smile',t); ctx.strokeStyle='#8a4434'; ctx.lineWidth=7; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(-126-sm_*4,92+fy-sm_*3); ctx.quadraticCurveTo(-104,92+fy+sm_*12-(1-sm_)*9*tv('brow',t),-82+sm_*4,92+fy-sm_*4); ctx.stroke();
+  ctx.restore();
+}
+// ---- real hands in 3D: bones, joints, left and right anatomy, projected into the picture ----
+// world 3D: x right, y down, z toward the camera. Each hand has a frame: X along the fingers, Z out of the palm, Y toward the thumb.
+const V3={add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]], sc:(a,k)=>[a[0]*k,a[1]*k,a[2]*k], dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+ cr:(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]], nz:a=>{const l=Math.hypot(a[0],a[1],a[2])||1;return [a[0]/l,a[1]/l,a[2]/l];},
+ mix:(a,b,u)=>[lerp(a[0],b[0],u),lerp(a[1],b[1],u),lerp(a[2],b[2],u)], comb:(...p)=>{const r=[0,0,0];for(let i=0;i<p.length;i+=2){r[0]+=p[i][0]*p[i+1];r[1]+=p[i][1]*p[i+1];r[2]+=p[i][2]*p[i+1];}return r;}};
+const HSC=.86;     // hand scale: about 145 px from wrist to the middle fingertip
+const FING=[ // knuckle position (x along the hand, y toward the thumb), bone lengths, widths, natural spread
+ {b:[80,25],L:[36,24,19],w:[17,15,13],sp:.11},
+ {b:[85,8],L:[40,27,20],w:[18,16,13.5],sp:.02},
+ {b:[81,-9],L:[37,25,19],w:[17,15,12.5],sp:-.07},
+ {b:[72,-25],L:[29,19,17],w:[15,13.5,11.5],sp:-.18}];
+const PALM=[[0,-26],[6,-31],[30,-34],[60,-33],[72,-31],[80,-18],[86,-2],[85,14],[81,29],[62,33],[36,37],[16,35],[3,26],[0,0]];
+const LIGHT=V3.nz([-.3,-.8,.55]);
+function hframe(F,N,left){F=V3.nz(F); N=V3.nz(V3.add(N,V3.sc(F,-V3.dot(N,F)))); const Y=left?V3.cr(F,N):V3.cr(N,F); return {X:F,Y,Z:N};}
+function hull(P){P=P.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]); const cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+  const lo=[],up=[]; for(const p of P){while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],p)<=0) lo.pop(); lo.push(p);}
+  for(let i=P.length-1;i>=0;i--){const p=P[i]; while(up.length>=2&&cr(up[up.length-2],up[up.length-1],p)<=0) up.pop(); up.push(p);}
+  up.pop(); lo.pop(); return lo.concat(up);}
+function handPose3D(s,near,t){
+  const q=handParams(s,near,t); const e=elbowOf(s,near), h=near?s.hn:s.hf;
+  let fx=h[0]-e[0], fy=h[1]-e[1]; const l=Math.hypot(fx,fy)||1; fx/=l; fy/=l;
+  const pen=near?s.wr*(1-s.arms):0;
+  let F=V3.nz([fx,fy,fy*1.4]), N=[0,.89,-.45];                    // flat on the table, back of the hand up
+  N=V3.mix(N,[.55,.5,-.62],pen);                                  // writing: resting on the little-finger edge
+  F=V3.mix(F,near?[-.5,-.82,.28]:[-.42,-.86,.24],s.dua);          // dua: fingers toward the sky
+  N=V3.mix(N,near?[.5,-.22,.84]:[.46,-.26,.82],s.dua);            // palms open toward his face, and toward us
+  const st_=tv('stretch',t), ht_=near?tv('heart',t):0;
+  F=V3.mix(F,near?[-.2,-1,.12]:[-.05,-1,.05],st_); N=V3.mix(N,[-.25,.05,.97],st_);   // stretching: fingers to the ceiling
+  F=V3.mix(F,[.12,-.9,.42],ht_); N=V3.mix(N,[1,.05,-.1],ht_);                         // hand on his heart: palm on his chest
+  const left=near;                                                // we see his left side: the near arm is his LEFT arm
+  const fr=hframe(F,N,left);
+  const W3=V3.sc(fr.X,-40*HSC); const W=[h[0]+W3[0],h[1]+W3[1]];  // the wrist sits behind the palm centre
+  return {q,fr,W,left};
+}
+function handWrist(s,near){return handPose3D(s,near,s.t).W;}
+function drawHand3D(s,near,t){
+  const {q,fr,W}=handPose3D(s,near,t); const {X,Y,Z}=fr;
+  const dk=near?0:.2, sh=(c,n)=>{const k=.8+.28*V3.dot(n,LIGHT); return fc(mixc(mixc(c,[60,40,30],dk),[0,0,0],clamp(1-k,0,.35)));};
+  const PJ=(x,y,z)=>{const p=V3.comb(X,x*HSC,Y,y*HSC,Z,z*HSC); return [W[0]+p[0],W[1]+p[1],p[2]];};
+  const palmCol=mixc(P.skin,[248,196,170],.38), dorCol=P.skin, edge=fc(mixc(P.skinD,[70,40,28],.35+dk));
+  const seePalm=Z[2]>0;
+  // fingers: each a chain of three bones bending toward the palm
+  const items=[];
+  for(let i=0;i<4;i++){const f=FING[i]; const c=q.curls[i]; const flex=[1.35*c+(i===0?q.tap*.45:0),1.55*c,1.0*c];
+    const sp=f.sp*lerp(.8,1.5,q.spread*s.dua+(1-s.dua)*.3); let d=V3.add(V3.sc(X,Math.cos(sp)),V3.sc(Y,Math.sin(sp))), n=Z;
+    let p=PJ(f.b[0],f.b[1],0); const pts=[p], nrm=[];
+    for(let k=0;k<3;k++){const a=flex[k]; const d2=V3.add(V3.sc(d,Math.cos(a)),V3.sc(n,Math.sin(a))), n2=V3.add(V3.sc(d,-Math.sin(a)),V3.sc(n,Math.cos(a))); d=d2; n=n2;
+      const L=f.L[k]*HSC; p=[p[0]+d[0]*L,p[1]+d[1]*L,p[2]+d[2]*L]; pts.push(p); nrm.push(n);}
+    items.push({z:(pts[0][2]+pts[1][2]+pts[2][2]+pts[3][2])/4+(seePalm?1:-1)*c*6, kind:'f', i, pts, nrm, w:f.w});}
+  // thumb: metacarpal from the heel of the hand, opposing toward the palm as it curls
+  {const tc=q.tcurl; let d=V3.nz(V3.comb(X,lerp(.82,.55,tc),Y,lerp(.5,-.1,tc),Z,lerp(.22,.75,tc)));
+    const cdir=V3.nz(V3.comb(X,.3,Y,-1,Z,.7)); let n=V3.nz(V3.add(cdir,V3.sc(d,-V3.dot(cdir,d))));
+    let p=PJ(12,20,4); const pts=[p], nrm=[]; const L=[36,29,24], fl=[0,.5*tc,.7*tc];
+    for(let k=0;k<3;k++){const a=fl[k]; const d2=V3.add(V3.sc(d,Math.cos(a)),V3.sc(n,Math.sin(a))), n2=V3.add(V3.sc(d,-Math.sin(a)),V3.sc(n,Math.cos(a))); d=d2; n=n2;
+      p=[p[0]+d[0]*L[k]*HSC,p[1]+d[1]*L[k]*HSC,p[2]+d[2]*L[k]*HSC]; pts.push(p); nrm.push(n);}
+    items.push({z:(pts[1][2]+pts[2][2]+pts[3][2])/3, kind:'t', pts, nrm, w:[27,20,17]});}
+  // palm: both faces, hulled into one solid
+  {const pp=[]; for(const [x,y] of PALM){pp.push(PJ(x,y,7)); pp.push(PJ(x,y,-7));} items.push({z:PJ(42,0,0)[2], kind:'p', pts:hull(pp)});}
+  items.sort((a,b)=>a.z-b.z);
+  const wristBlend=()=>{const e=elbowOf(s,near), a=[lerp(e[0],W[0],.82),lerp(e[1],W[1],.82)], b=PJ(9,0,0); limb(a,b,37,38*HSC+6,fc(mixc(P.skin,[60,40,30],dk)));};
+  const tube=(pts,w,col,ow)=>{ for(let k=0;k<pts.length-1;k++){const a=pts[k], b=pts[k+1]; limb(a,b,w[k]*HSC+ow,(w[k+1]??w[k]*.9)*HSC+ow,col);} };
+  for(const it of items){
+    if(it.kind==='p'){
+      ctx.fillStyle=edge; ctx.beginPath(); it.pts.forEach((p,j)=>j?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath(); ctx.lineJoin='round'; ctx.lineWidth=4; ctx.strokeStyle=edge; ctx.stroke();
+      ctx.fillStyle=sh(seePalm?palmCol:dorCol,seePalm?Z:V3.sc(Z,-1)); ctx.fill();
+      wristBlend();
+      const z=seePalm?7:-7;
+      if(seePalm){ // the palm: soft hollow, thenar mound, and its three creases
+        const cc=PJ(46,-2,z); const g=ctx.createRadialGradient(cc[0],cc[1],2,cc[0],cc[1],34*HSC); g.addColorStop(0,'rgba(150,80,60,.16)'); g.addColorStop(1,'rgba(150,80,60,0)'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(cc[0],cc[1],34*HSC,0,7); ctx.fill();
+        const a=clamp((Z[2]-.12)*2.2); ctx.strokeStyle=fc(mixc(P.skinD,[120,60,45],.4),.55*a); ctx.lineWidth=2.2; ctx.lineCap='round';
+        const crease=(A,C,B)=>{const a_=PJ(A[0],A[1],z),c_=PJ(C[0],C[1],z),b_=PJ(B[0],B[1],z); ctx.beginPath(); ctx.moveTo(a_[0],a_[1]); ctx.quadraticCurveTo(c_[0],c_[1],b_[0],b_[1]); ctx.stroke();};
+        crease([70,-31],[64,-6],[74,16]);   // heart line
+        crease([62,28],[46,4],[46,-28]);    // head line
+        crease([63,29],[30,30],[6,14]);     // life line around the thumb's mound
+        ctx.lineWidth=1.4; ctx.strokeStyle=fc(mixc(P.skinD,[120,60,45],.4),.3*a); crease([40,-30],[30,-18],[18,-24]);
+      } else {     // the back of the hand: knuckles and faint tendons
+        const a=clamp((-Z[2]-.12)*2.2); ctx.strokeStyle=fc(P.skinD,.35*a); ctx.lineWidth=1.6; ctx.lineCap='round';
+        for(const f of FING){const k0=PJ(10,f.b[1]*.4,z), k1=PJ(f.b[0]-6,f.b[1],z); ctx.beginPath(); ctx.moveTo(k0[0],k0[1]); ctx.lineTo(k1[0],k1[1]); ctx.stroke();}
+        for(const f of FING){const k=PJ(f.b[0],f.b[1],z-1); ctx.fillStyle=fc(mixc(P.skin,[255,230,210],.35),.55*a); ctx.beginPath(); ctx.ellipse(k[0],k[1],5.5*HSC,4*HSC,0,0,7); ctx.fill();}
+      }
+      continue;}
+    // a finger or the thumb
+    const base=it.kind==='t'?dorCol:dorCol; const n0=it.nrm[1];
+    const vis=V3.dot(n0,[0,0,1]); const col=vis>0?mixc(dorCol,palmCol,clamp(vis*1.5)*.7):dorCol;
+    tube(it.pts,it.w,edge,4); tube(it.pts,it.w,sh(col,n0),0);
+    // joints: creases on the palm side, wrinkles on the back, a nail on the last bone
+    for(let k=1;k<it.pts.length-1;k++){const a=it.pts[k], d=[it.pts[k+1][0]-it.pts[k-1][0],it.pts[k+1][1]-it.pts[k-1][1]]; const l=Math.hypot(d[0],d[1])||1; const nx=-d[1]/l, ny=d[0]/l; const hw=it.w[k]*HSC*.36;
+      if(l<4) continue; ctx.strokeStyle=fc(mixc(P.skinD,[110,60,40],.4),.45); ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(a[0]-nx*hw,a[1]-ny*hw); ctx.lineTo(a[0]+nx*hw,a[1]+ny*hw); ctx.stroke();}
+    const nl=it.nrm[2], dors=-nl[2];
+    if(dors>.08){const a=it.pts[2], b=it.pts[3]; const d=[b[0]-a[0],b[1]-a[1]]; const l=Math.hypot(d[0],d[1]); if(l>5){const ux=d[0]/l, uy=d[1]/l; const wv=it.w[2]*HSC*.62*Math.min(1,dors*1.6+.2);
+      const c0=[lerp(a[0],b[0],.5),lerp(a[1],b[1],.5)], len=l*.58; const ang=Math.atan2(uy,ux);
+      ctx.save(); ctx.translate(c0[0]+ux*len*.25,c0[1]+uy*len*.25); ctx.rotate(ang); ctx.globalAlpha=Math.min(1,dors*2.5);
+      ctx.fillStyle=fc(mixc(dorCol,[250,214,200],.55)); rr(-len/2,-wv/2,len,wv,wv*.45); ctx.fill();
+      ctx.strokeStyle=fc(P.skinD,.6); ctx.lineWidth=1.2; ctx.stroke();
+      ctx.fillStyle='rgba(255,255,255,.35)'; rr(-len/2+2,-wv/2+1.5,len*.5,wv*.28,2); ctx.fill(); ctx.restore();}}
+    else if(nl[2]>.1){const b=it.pts[3]; ctx.fillStyle='rgba(255,225,205,.14)'; ctx.beginPath(); ctx.arc(b[0],b[1],it.w[2]*HSC*.3,0,7); ctx.fill();}   // fingertip pad
+  }
+}
+// ---------------- the table and what's on it ----------------
+function drawTable(t,W){
+  const {by,fy,bl,br,fl,fr}=TAB;
+  const wd=mixc(P.wood,[176,128,92],W*.7), wdD=mixc(P.woodD,[130,92,64],W*.7);
+  // legs
+  ctx.fillStyle=rgb(wdD); rr(fl+20,fy+60,60,980,14); ctx.fill(); rr(fr-80,fy+60,60,980,14); ctx.fill();
+  // shadow on the floor under the table
+  const sh=ctx.createRadialGradient(140,2130,0,140,2130,820); sh.addColorStop(0,'rgba(8,8,12,.55)'); sh.addColorStop(1,'rgba(8,8,12,0)');
+  ctx.save(); ctx.translate(140,2130); ctx.scale(1,.16); ctx.translate(-140,-2130); ctx.fillStyle=sh; ctx.beginPath(); ctx.arc(140,2130,820,0,7); ctx.fill(); ctx.restore();
+  // top
+  const g=ctx.createLinearGradient(0,by,0,fy); g.addColorStop(0,rgb(mixc(wd,[0,0,0],.18))); g.addColorStop(1,rgb(wd)); ctx.fillStyle=g;
+  quad([[bl,by],[br,by],[fr,fy],[fl,fy]]); ctx.fill();
+  // grain
+  ctx.strokeStyle=rgb(wdD,.35); ctx.lineWidth=3; const Rg=rng(5);
+  for(let i=0;i<9;i++){const u=Rg(); const y=lerp(by+10,fy-8,u); const xl=lerp(bl,fl,u), xr=lerp(br,fr,u); ctx.beginPath(); ctx.moveTo(xl+Rg()*200,y); ctx.lineTo(xr-Rg()*260,y+Rg()*4-2); ctx.stroke();}
+  // front apron
+  ctx.fillStyle=rgb(wdD); ctx.fillRect(fl,fy,fr-fl,62);
+  ctx.fillStyle=rgb(mixc(P.woodL,[214,170,128],W*.7),.6); ctx.fillRect(fl,fy,fr-fl,5);
+}
+// a bill lying flat (seen from the high front camera: wide and shallow)
+const BW=262, BD=40, BT=8;
+const PAPER=[hx('#eeece6'),hx('#f2ead6'),hx('#e6ebf0'),hx('#efe6e2')];
+const AMT=['$480.00','$1,250.00','$96.40','$2,300.00','$640.00','$315.00','$870.00','$1,140.00','$205.90'];
+function billFace(k,glow,dark){
+  // the full face of a bill at reference size BW x 170 (caller scales it to the foreshortened height)
+  const R=rng(100+k); const col=PAPER[Math.floor(R()*4)], over=R()<.6; const amt=AMT[k%AMT.length];
+  const c=dark?mixc(col,[150,150,156],.35):col;
+  ctx.fillStyle=rgb(mixc(c,[255,236,196],glow*.7)); ctx.fillRect(-BW/2,-85,BW,170);
+  if(dark) return;
+  ctx.fillStyle=`rgba(32,44,70,${1-glow*.4})`; ctx.fillRect(-BW/2,-85,BW,40);
+  ctx.textBaseline='middle'; ctx.textAlign='left';
+  ctx.fillStyle='#fff'; ctx.font='800 30px InterU'; ctx.fillText('BILL',-BW/2+16,-64);
+  ctx.fillStyle='rgba(255,255,255,.55)'; ctx.fillRect(BW/2-96,-70,78,5); ctx.fillRect(BW/2-96,-60,54,5);
+  ctx.fillStyle='rgba(60,66,78,.65)'; ctx.font='600 15px InterU'; ctx.fillText('AMOUNT DUE',-BW/2+16,-24);
+  ctx.fillStyle=`rgba(200,40,40,${1-glow*.5})`; ctx.font='800 42px InterU'; ctx.fillText(amt,-BW/2+14,14);
+  ctx.fillStyle='rgba(60,66,78,.35)'; ctx.fillRect(-BW/2+16,48,120,5); ctx.fillRect(-BW/2+16,62,90,5);
+  if(over){ctx.save(); ctx.translate(BW/2-62,48); ctx.rotate(-.22); ctx.strokeStyle=`rgba(204,36,36,${.85*(1-glow*.5)})`; ctx.lineWidth=4; ctx.strokeRect(-56,-17,112,34);
+    ctx.fillStyle=`rgba(204,36,36,${.85*(1-glow*.5)})`; ctx.font='800 19px InterU'; ctx.textAlign='center'; ctx.fillText('OVERDUE',0,1); ctx.restore();}
+}
+function drawFlatBill(x,y,rot,k,glow,lift){
+  // x,y = centre of the sheet's top face; lift scales how much of the face (vs. edge) shows
+  const R=rng(100+k); const col=PAPER[Math.floor(R()*4)];
+  const d=BD*(lift===undefined?1:lift);
+  ctx.save(); ctx.translate(x,y); ctx.rotate(rot);
+  ctx.fillStyle=rgb(mixc(mixc(col,[120,124,132],.45),[255,214,150],glow*.6)); ctx.fillRect(-BW/2,d/2-1,BW,BT);
+  ctx.save(); ctx.scale(1,d/170); billFace(k,glow,false); ctx.restore();
+  ctx.restore();
+}
+// a falling or floating sheet: tilt phi (0 = flat) shows more or less of its face
+function drawAirBill(x,y,rot,phi,k,glow,n=1,sc=1,gold=0,alpha=1){
+  const R=rng(100+k); const col=PAPER[Math.floor(R()*4)];
+  const face=Math.cos(phi); const d=BD+(170-BD)*Math.abs(Math.sin(phi));
+  ctx.save(); ctx.translate(x,y); ctx.rotate(rot); ctx.scale(sc,sc); ctx.globalAlpha=alpha;
+  if(gold>0){ctx.save(); ctx.globalCompositeOperation='screen'; const r=BW*.85; const g=ctx.createRadialGradient(0,0,0,0,0,r); g.addColorStop(0,`rgba(255,200,100,${.5*gold*alpha})`); g.addColorStop(1,'rgba(255,170,70,0)'); ctx.fillStyle=g; ctx.fillRect(-r,-r,2*r,2*r); ctx.restore();}
+  for(let j=n-1;j>=0;j--){const oy=j*BT*Math.abs(face);
+    ctx.fillStyle=rgb(mixc(mixc(mixc(col,[120,124,132],.45),[255,214,150],glow*.6),[196,140,40],gold)); ctx.fillRect(-BW/2,oy+d/2-1,BW,BT);
+    ctx.save(); ctx.translate(0,oy); ctx.scale(1,d/170); billFace(k,glow,j>0||face<-.05&&false);
+    if(gold>0){ctx.globalCompositeOperation='color'; ctx.fillStyle=`rgba(214,160,40,${gold})`; ctx.fillRect(-BW/2,-85,BW,170);
+      ctx.globalCompositeOperation='screen'; ctx.fillStyle=`rgba(255,196,90,${.32*gold})`; ctx.fillRect(-BW/2,-85,BW,170);
+      const sx=lerp(-BW/2-60,BW/2+60,clamp((gold-.1)/.9)); const g=ctx.createLinearGradient(sx-50,0,sx+50,0); g.addColorStop(0,'rgba(255,250,220,0)'); g.addColorStop(.5,`rgba(255,250,220,${.55*Math.sin(Math.PI*gold)})`); g.addColorStop(1,'rgba(255,250,220,0)'); ctx.fillStyle=g; ctx.fillRect(-BW/2,-85,BW,170);}
+    ctx.restore();}
+  ctx.restore();
+}
+// ---- the stack on his back ----
+const NB=16, N0=6, B1=[6,9], B2=[9,16];
+const SH=(()=>{const R=rng(65);const a=[];for(let i=0;i<NB;i++)a.push({dx:(R()-.5)*30,rot:(R()-.5)*.09});return a;})();
+const DEP=i=>12.85+(NB-1-i)*.1;            // the top sheet leaves first
+const LIFT=.35, FLY=1.25;
+function onBack(i,t){
+  if(t>=RESET) return i<N0;
+  if(i>=B2[0]) return t>=T2 && t<DEP(i);
+  if(i>=B1[0]) return t>=T1 && t<DEP(i);
+  return t<DEP(i);
+}
+function comp(t){let c=0;for(const[h,a]of [[T1,.22],[T2,.34]]){const x=t-h;if(x<0)continue;c+=a*Math.exp(-x*6)*Math.sin(x*16);}return c;}
+const SBD=.62;   // the bills on his back are seen nearly edge-on
+function stackSlot(s,i,t){
+  const th=BT*(1-comp(t)); const ca=Math.cos(s.ang), sa=Math.sin(s.ang);
+  const up=[sa,-ca], al=[ca,sa];
+  const h=(i+1)*th+BD*SBD/2-3, d=SH[i].dx+Math.sin(t*PER(1.1)+i*.3)*.6;
+  return [s.top[0]+up[0]*h+al[0]*d, s.top[1]+up[1]*h+al[1]*d, s.ang+SH[i].rot];
+}
+function drawStack(s,t,glowAll){
+  if(s.hump<=.001) return;
+  for(let i=0;i<NB;i++){ if(!onBack(i,t)) continue; const [x,y,r]=stackSlot(s,i,t);
+    drawFlatBill(x,y,r,i,glowAll,SBD);}
+}
+// ---- falling bundles (the two blows) ----
+function fallPos(t,Ts,Tl,x0,y0,sway,tumb,ex,k0,arc){
+  // the bill glides in from the side of the room, face toward us, and drops onto his back
+  const u=clamp((t-Ts)/(Tl-Ts)); const s=pose(Tl); const top=stackSlot(s,k0+ex-1,Tl);
+  const xT=top[0], yT=top[1];
+  const ux=1-Math.pow(1-u,1.6);                 // it slows as it arrives over him
+  const x=lerp(x0,xT,ux);
+  const dec=Math.pow(1-u,1.2);
+  const y=lerp(y0,yT,Math.pow(u,2.2))-arc*Math.sin(Math.PI*Math.pow(u,.8))*dec+sway*Math.sin(2*Math.PI*1.2*u)*dec;
+  const rot=lerp(0,top[2],u)+tumb*.22*Math.cos(2*Math.PI*1.2*u)*dec;
+  const phi=tumb*1.25*Math.pow(1-u,1.1)*(.85+.15*Math.sin(2*Math.PI*1.2*u+.6));
+  return {x,y,rot,phi,u};
+}
+function bundleState(t,which){
+  if(which===1){ if(t<.2||t>=T1) return null; const p=fallPos(t,.2,T1,1260,560,18,1.0,3,6,40); return {...p,n:3,k:6}; }
+  if(t<3.0||t>=T2) return null; const p=fallPos(t,3.0,T2,-330,500,10,.8,7,9,70); return {...p,n:7,k:9};
+}
+function bundleMembers(b,Tl){
+  // each sheet of the falling bundle sits where it will land relative to the top sheet, so touchdown is exact
+  const s=pose(Tl), top=stackSlot(s,b.k+b.n-1,Tl), out=[];
+  const cs=Math.cos(b.phi);
+  for(let m=0;m<b.n;m++){const q=stackSlot(s,b.k+m,Tl); const dx=q[0]-top[0], dy=(q[1]-top[1])*cs; const c=Math.cos(b.rot-top[2]), sn=Math.sin(b.rot-top[2]);
+    out.push({m:b.k+m,x:b.x+dx*c-dy*sn,y:b.y+dx*sn+dy*c,rot:b.rot+(q[2]-top[2])});}
+  return out;
+}
+function drawFalling(t){
+  for(const w of [1,2]){const b=bundleState(t,w); if(!b) continue; const Tl=w===1?T1:T2;
+    const ms=bundleMembers(b,Tl); for(const q of ms) drawAirBill(q.x,q.y,q.rot,b.phi,q.m,0,1);}
+}
+// ---- the answer: sheets float off his back and settle on the table ----
+// 2nd dhikr: the pile rises, sheet by sheet, into a slow floating crown above the table
+// 3rd dhikr: each sheet turns gold on its own, then dissolves into rising gold light
+const LEV0=16.3, LEVD=1.7, GOLD0=19.15, GOLDD=.6, FADE0=21.3, FADED=.95;
+const GORD=(()=>{const R=rng(77),a=[...Array(NB).keys()]; for(let i=a.length-1;i>0;i--){const j=Math.floor(R()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a;})();
+const levStart=k=>LEV0+(NB-1-k)*.075, goldStart=k=>GOLD0+GORD[k]*.11, fadeStart=k=>FADE0+GORD[k]*.065;
+function hoverSlot(k){
+  const inner=k>=10, j=inner?k-10:k, n=inner?6:10; const a=Math.PI*(inner?1.18+.56*j/(n-1):1.08+.74*j/(n-1)); const R=inner?165:270;
+  return {x:110+R*Math.cos(a), y:500+R*.6*Math.sin(a)+(inner?14:0), rot:(a-1.5*Math.PI)*.32, sc:inner?.56:.62, ph:j*1.7+(inner?.9:0), inner};
+}
+function levitate(k,t,end){
+  const t0=levStart(k); if(t<t0) return null; const f0=fadeStart(k); if(t>f0+FADED) return {gone:true};
+  const h=hoverSlot(k); const u=clamp((t-t0)/LEVD), e=u<.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2;
+  const bob=Math.sin(2*Math.PI*.32*(t-t0)+h.ph)*7*ss(0,1,u), sway=Math.sin(2*Math.PI*.21*(t-t0)+h.ph*1.3)*.05*ss(0,1,u);
+  const x=lerp(end[0],h.x,e)+Math.sin(Math.PI*u)*30*Math.sin(h.ph), y=lerp(end[1],h.y,e)-Math.sin(Math.PI*u)*70+bob;
+  const rot=lerp(end[2],h.rot,e)+.18*Math.sin(Math.PI*u*2)*(1-u)+sway, phi=lerp(0,1.3,ss(0,.8,u)), sc=lerp(1,h.sc,e);
+  const gold=ss(0,1,(t-goldStart(k))/GOLDD), fade=clamp((t-f0)/FADED);
+  return {x,y,rot,phi,g:1,landed:false,lev:true,sc,gold,fade,k,inner:h.inner};
+}
+function goldDust(f,t){
+  // the dissolving sheet becomes sparks of light that drift up and go out
+  const k=f.k, t0=f.t0??fadeStart(k); if(t<t0) return; const R=rng(900+k); ctx.save(); ctx.globalCompositeOperation='screen';
+  for(let p=0;p<34;p++){const ex=(R()-.5)*BW*f.sc, ey=(R()-.5)*120*f.sc, born=t0+R()*.75, life=1.1+R()*.7, vx=(R()-.5)*40, vy=40+R()*70, r=1.4+R()*2.6;
+    const a=t-born; if(a<0||a>life) continue; const cs=Math.cos(f.rot), sn=Math.sin(f.rot);
+    const x=f.x+ex*cs-ey*sn+vx*a+Math.sin(a*3+p)*6, y=f.y+ex*sn+ey*cs-vy*a-12*a*a; const al=Math.sin(Math.PI*a/life);
+    const g=ctx.createRadialGradient(x,y,0,x,y,r*4); g.addColorStop(0,`rgba(255,236,170,${.9*al})`); g.addColorStop(.35,`rgba(255,196,90,${.35*al})`); g.addColorStop(1,'rgba(255,170,60,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r*4,0,7); ctx.fill();}
+  ctx.restore();
+}
+const PILE={x:40,y:1050};
+function pileSlot(k){const R=rng(300+k); return [PILE.x+(R()-.5)*14, PILE.y-k*BT*.82, (R()-.5)*.05];}
+function flight(i,t){
+  const d=DEP(i); if(t<d||t>=RESET) return null; const k=NB-1-i;
+  const s0=pose(d); const st=stackSlot(s0,i,d); const end=pileSlot(k);
+  if(t<d+LIFT){const u=(t-d)/LIFT; const e=sm(u); return {x:st[0]+Math.sin(u*3)*4,y:st[1]-30*e,rot:st[2]+.03*Math.sin(u*5),phi:.12*Math.sin(u*Math.PI),g:e,landed:false};}
+  const u=clamp((t-d-LIFT)/FLY);
+  if(u>=1){const L=levitate(k,t,end); if(L) return L; return {x:end[0],y:end[1],rot:end[2],phi:0,g:1,landed:true};}
+  const v=u<.5?2*u*u:1-Math.pow(-2*u+2,2)/2;   // a slow start, a soft arrival
+  const P0=[st[0],st[1]-30], P1=[st[0]-120,st[1]-80], P2=[end[0]+190,end[1]-230], P3=[end[0],end[1]];
+  const b=(a,b_,c,d_,w)=>{const m=1-w;return m*m*m*a+3*m*m*w*b_+3*m*w*w*c+w*w*w*d_;};
+  const env=Math.sin(Math.PI*u)*Math.pow(1-u,.6);
+  const x=b(P0[0],P1[0],P2[0],P3[0],v)+42*Math.sin(2*Math.PI*1.25*u+i)*env;
+  const y=b(P0[1],P1[1],P2[1],P3[1],v);
+  const rot=lerp(st[2],end[2],v)+.32*Math.cos(2*Math.PI*1.25*u+i)*env;
+  const phi=.85*Math.sin(2*Math.PI*1.25*u+i+.5)*env;
+  return {x,y,rot,phi,g:1,landed:false};
+}
+function drawFlights(t){
+  const L=[]; for(let i=NB-1;i>=0;i--){const f=flight(i,t); if(!f||f.landed||f.gone) continue; L.push([i,f]);}
+  L.sort((a,b)=>(b[1].inner?1:0)-(a[1].inner?1:0));          // the inner ring floats further back
+  for(const [i,f] of L){ if(f.lev){const a=1-ss(0,1,f.fade); if(a>.002) drawAirBill(f.x,f.y,f.rot,f.phi,i,f.g,1,f.sc*(1+.08*f.fade),f.gold,a);} else drawAirBill(f.x,f.y,f.rot,f.phi,i,f.g); }
+  for(const [i,f] of L) if(f.lev&&f.fade>0) goldDust(f,t);
+  for(let i=0;i<NB;i++){const f=flight(i,t); if(f&&f.gone){const k=NB-1-i; const h=hoverSlot(k); const d=t-fadeStart(k); if(d<2.5) goldDust({k,x:h.x,y:h.y,rot:h.rot,sc:h.sc},t);}}
+}
+function drawPile(t){
+  if(t>=RESET) return;
+  for(let i=NB-1;i>=0;i--){const f=flight(i,t); if(!f||!f.landed) continue; const k=NB-1-i; const p=pileSlot(k); drawFlatBill(p[0],p[1],p[2],i,1);}
+}
+// loose opened bills on the table by his right hand; they jump a little when his arms hit the table
+const LOOSE=[[380,1130,.1,41],[330,1180,-.06,40],[440,1222,.04,42]];
+function drawLoose(t){
+  const j=(x)=>{const d=t-(T2+.28);return d>0&&d<.5?Math.sin(d*Math.PI/.5)*x*Math.exp(-d*4):0;};
+  // they go too: on the third dhikr they turn gold where they lie and dissolve with the rest
+  const ph=Math.asin((2.7*BD-BD)/(170-BD));
+  LOOSE.forEach(([x,y,r,k],m)=>{const gs=GOLD0+(NB+m)*.08, fs=FADE0+(NB*.5+m)*.07; const gold=t<RESET?ss(0,1,(t-gs)/GOLDD):0, fade=t<RESET?clamp((t-fs)/FADED):0;
+    if(fade<1) drawAirBill(x,y-j(9+k%3*3),r+j(.01),ph,k,0,1,1+.06*fade,gold,1-ss(0,1,fade));
+    if(fade>0&&t<RESET) goldDust({k,x,y,rot:r,sc:1,t0:fs},t);});
+}
+function drawCalc(t,s){
+  const fl=s.flip, cs=Math.cos(Math.PI*fl), lift=Math.sin(Math.PI*fl);
+  const x=CALC.x, y=CALC.y-lift*58; const w=210, h=150;
+  ctx.save(); ctx.translate(x,y); ctx.rotate(-.06);
+  // contact shadow
+  ctx.fillStyle=`rgba(0,0,0,${.28*(1-lift*.6)})`; ctx.beginPath(); ctx.ellipse(0,h/2+8+lift*58,w*.6,16,0,0,7); ctx.fill();
+  ctx.scale(1,Math.max(Math.abs(cs),.04));
+  if(cs>=0){
+    ctx.fillStyle='#2c3139'; rr(-w/2,-h/2,w,h,14); ctx.fill();
+    ctx.fillStyle='#b3c4a4'; rr(-w/2+12,-h/2+12,w-24,52,8); ctx.fill();
+    ctx.fillStyle='#16201a'; ctx.font='700 38px InterU'; ctx.textAlign='right'; ctx.textBaseline='middle'; ctx.fillText(calcVal(t),w/2-24,-h/2+39);
+    ctx.fillStyle='#4a515c'; for(let r=0;r<3;r++) for(let c=0;c<5;c++){rr(-w/2+14+c*37.5,-h/2+76+r*23,31,17,4); ctx.fill();}
+  } else {
+    ctx.fillStyle='#22262d'; rr(-w/2,-h/2,w,h,14); ctx.fill(); ctx.fillStyle='rgba(255,255,255,.05)'; rr(-w/2+10,-h/2+8,w-20,h-16,10); ctx.fill();
+  }
+  ctx.restore();
+}
+// ---------------- light ----------------
+function drawLampLight(t,c,W){
+  ctx.save(); ctx.globalCompositeOperation='screen'; const a=lerp(1,.35,W);
+  const g=ctx.createLinearGradient(0,170,0,1250); g.addColorStop(0,`rgba(200,214,240,${.16*a})`); g.addColorStop(1,`rgba(200,214,240,${.05*a})`);
+  ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(210,172); ctx.lineTo(390,172); ctx.lineTo(960,1250); ctx.lineTo(-360,1250); ctx.closePath(); ctx.fill();
+  const p=ctx.createRadialGradient(300,1150,0,300,1150,620); p.addColorStop(0,`rgba(205,220,245,${.20*a})`); p.addColorStop(1,'rgba(205,220,245,0)'); ctx.fillStyle=p;
+  ctx.save(); ctx.translate(300,1150); ctx.scale(1,.35); ctx.translate(-300,-1150); ctx.beginPath(); ctx.arc(300,1150,620,0,7); ctx.fill(); ctx.restore();
+  // dust drifting in the lamp light
+  const R=rng(17); for(let i=0;i<34;i++){const bx=10+R()*600, by=250+R()*820, sp=.12+R()*.3; const x=bx+Math.sin(t*PER(sp)+i)*26, y=by+Math.cos(t*PER(sp*.7)+i)*20;
+    const inC=clamp(1-Math.abs(x-300)/(90+(y-170)*.58)); ctx.fillStyle=`rgba(225,232,250,${.32*a*inC*(.4+.6*R())})`; ctx.beginPath(); ctx.arc(x,y,1.4+R()*1.8,0,7); ctx.fill();}
+  ctx.restore();
+}
+function drawSunBeams(t,W){
+  if(W<=0) return; ctx.save(); ctx.globalCompositeOperation='screen';
+  for(let i=0;i<4;i++){const x0=WIN.x0+40+i*95, w=60+i*18, sh=Math.sin(t*.33+i*1.7)*.2+.8;
+    const g=ctx.createLinearGradient(x0,WIN.y0,x0-700,1500); g.addColorStop(0,`rgba(255,214,150,${.17*W*sh})`); g.addColorStop(1,'rgba(255,214,150,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(x0,WIN.y0+80); ctx.lineTo(x0+w,WIN.y0+80); ctx.lineTo(x0+w-760,1480); ctx.lineTo(x0-760-w*1.4,1480); ctx.closePath(); ctx.fill();}
+  const R=rng(9); for(let i=0;i<46;i++){const bx=-100+R()*1300, by=250+R()*1000, sp=.2+R()*.45; const x=bx+Math.sin(t*sp+i)*30, y=by+Math.cos(t*sp*.8+i)*24-((t*6*sp)%60);
+    ctx.fillStyle=`rgba(255,236,200,${.5*W*(.4+.6*R())})`; ctx.beginPath(); ctx.arc(x,y,1.6+R()*2.2,0,7); ctx.fill();}
+  ctx.restore();
+}
+function hearts(t){let h=0; for(const b of [12.6,13.4,15.75,18.75]) h=Math.max(h,Math.exp(-Math.max(0,t-b)*3.2)*(t>=b?1:0)); return h;}
+function drawGlow(s,t){
+  // warmth kindles under the bills on his back, from his open hands, then fills the room
+  const on=ss(12.55,12.9,t)*(1-ss(33.8,35.8,t)); if(on<=0) return; const W=tv('W',t);
+  ctx.save(); ctx.globalCompositeOperation='screen';
+  const hx_=lerp(s.hl[0],s.hr[0],.5), hy_=lerp(s.hl[1],s.hr[1],.5); const r=(130+hearts(t)*80+W*520)*on;
+  let g=ctx.createRadialGradient(hx_,hy_,0,hx_,hy_,r); g.addColorStop(0,`rgba(255,226,160,${.7*on})`); g.addColorStop(.3,`rgba(255,190,110,${.28*on})`); g.addColorStop(1,'rgba(255,170,90,0)');
+  ctx.fillStyle=g; ctx.fillRect(hx_-r,hy_-r,r*2,r*2);
+  const sb=onBack(NB-1,t)||onBack(0,t); if(sb&&s.hump>.05){const y=s.humpTop-60, x=s.top[0]; const r2=(220+hearts(t)*60)*on; g=ctx.createRadialGradient(x,y,0,x,y,r2); g.addColorStop(0,`rgba(255,220,150,${.45*on})`); g.addColorStop(1,'rgba(255,190,110,0)'); ctx.fillStyle=g; ctx.fillRect(x-r2,y-r2,r2*2,r2*2);}
+  ctx.restore();
+}
+// ---------------- grade ----------------
+function grade(t,c,s){
+  const W=tv('W',t); ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalCompositeOperation='multiply'; ctx.fillStyle=rgb(mixc([120,134,158],[255,244,228],W)); ctx.fillRect(0,0,W_,H_);
+  ctx.globalCompositeOperation='screen';
+  if(W>0){const [fx,fy]=toScr(c,470,900); const r=1300*Math.max(c.Z,.6); const g=ctx.createRadialGradient(fx,fy,0,fx,fy,r); g.addColorStop(0,`rgba(255,196,120,${.24*W})`); g.addColorStop(1,`rgba(255,180,110,${.05*W})`); ctx.fillStyle=g; ctx.fillRect(0,0,W_,H_);}
+  ctx.globalCompositeOperation='source-over';
+  const v=ctx.createRadialGradient(540,900,500,540,960,1350); v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,`rgba(0,0,0,${lerp(.55,.22,W)})`); ctx.fillStyle=v; ctx.fillRect(0,0,W_,H_);
+}
+// ---------------- text ----------------
+const A1a='وَمَن يَتَوَكَّلْ عَلَى اللَّهِ فَهُوَ', A1b='حَسْبُهُ', A2='إِنَّ اللَّهَ بَالِغُ أَمْرِهِ';
+const E1a='And whoever relies upon Allah,', E1b='then He is sufficient for him.', E2='Indeed, Allah will accomplish His purpose.';
+function drawText(t,ms){
+  ctx.setTransform(1,0,0,1,0,0); const W=tv('W',t); const TXC=505;
+  if(W>0){const sc=ctx.createRadialGradient(TXC,500,40,TXC,500,640); sc.addColorStop(0,`rgba(70,36,12,${.42*W})`); sc.addColorStop(1,'rgba(70,36,12,0)'); ctx.save(); ctx.translate(TXC,500); ctx.scale(1,.55); ctx.translate(-TXC,-500); ctx.fillStyle=sc; ctx.fillRect(TXC-660,-140,1320,1320); ctx.restore();}
+  ctx.save(); ctx.textBaseline='middle'; ctx.direction='rtl'; ctx.textAlign='center';
+  ctx.font='88px AmiriQ'; const w0=ctx.measureText(A1a).width, w1=ctx.measureText(A1b).width, gap=26, tot=w0+w1+gap;
+  const y1=352; const glowQ=ss(19.4,21.4,t)*(1-ss(34.2,35.4,t));
+  ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=22; ctx.fillStyle='#fff7ea';
+  ctx.fillText(A1a,TXC+tot/2-w0/2,y1);
+  ctx.fillStyle=rgb(mixc([255,247,234],[255,214,140],glowQ)); if(glowQ>0){ctx.shadowColor=`rgba(255,190,100,${.9*glowQ})`; ctx.shadowBlur=22+30*glowQ;}
+  ctx.fillText(A1b,TXC-tot/2+w1/2,y1);
+  ctx.restore();
+  ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowBlur=16;
+  ctx.font='italic 58px CormI'; ctx.fillStyle='#f8efe0'; ctx.fillText(E1a,TXC,448); ctx.fillText(E1b,TXC,506); ctx.restore();
+  // the dhikr leaves his mouth, three times: small, rising and fading as it goes
+  if(ms) for(const D of DHIKR){const u=t-D; if(u<0||u>3.1) continue; const a=ss(0,.4,u)*(1-ss(2.35,3.1,u)), e=1-Math.pow(1-clamp(u/1.2),3);
+    const sc=.55+.45*e, cx=ms[0]-70-200*sc, cy=ms[1]-8-40*e-14*u;
+    ctx.save(); ctx.translate(cx,cy); ctx.scale(sc,sc); ctx.globalAlpha=a; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.shadowColor='rgba(0,0,0,.75)'; ctx.shadowBlur=14; ctx.direction='rtl'; ctx.font='50px AmiriQ'; ctx.fillStyle='#fbf1de'; ctx.fillText('لَا حَوْلَ وَلَا قُوَّةَ إِلَّا بِاللَّهِ',0,0);
+    ctx.direction='ltr'; ctx.font='italic 23px CormI'; ctx.fillStyle='#efe4d0'; ctx.fillText('There is no might nor power except with Allah',0,42); ctx.restore();}
+  const out=1-ss(33.8,34.8,t); const p2=ss(29.7,31.1,t);
+  if(p2>0&&out>0){ctx.save(); ctx.font='74px AmiriQ'; ctx.direction='rtl'; ctx.textAlign='center'; ctx.textBaseline='middle'; const w=ctx.measureText(A2).width;
+    const xr=TXC+w/2+30, xl=xr-(w+60)*p2; ctx.beginPath(); ctx.rect(xl,540,xr-xl+40,140); ctx.clip();
+    ctx.globalAlpha=out; ctx.shadowColor='rgba(50,22,0,.8)'; ctx.shadowBlur=20; ctx.fillStyle='#fff6e4'; ctx.fillText(A2,TXC,606); ctx.restore();}
+  const e2=ss(30.7,31.7,t)*out;
+  if(e2>0){ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='italic 47px CormI'; ctx.shadowColor='rgba(50,22,0,.85)'; ctx.shadowBlur=16; ctx.fillStyle='#fff6ea';
+    ctx.globalAlpha=e2; ctx.fillText(E2,TXC,688); ctx.restore();}
+  const rf=ss(31.6,32.3,t)*out; if(rf>0){ctx.save(); ctx.textAlign='center'; ctx.font='30px Corm'; ctx.letterSpacing='7px'; ctx.fillStyle=`rgba(255,240,215,${.8*rf})`; ctx.shadowColor='rgba(60,30,0,.6)'; ctx.shadowBlur=10; ctx.fillText('AT-TALAQ 65:3',TXC,738); ctx.restore();}
+  const wm=ss(31.9,32.6,t)*out; if(wm>0){ctx.save(); ctx.textAlign='center'; ctx.font='28px Corm'; ctx.letterSpacing='10px'; ctx.fillStyle=`rgba(255,240,215,${.55*wm})`; ctx.fillText('AYAH STUDIO',TXC,1300); ctx.restore();}
+  if(window.SAFE){ctx.strokeStyle='rgba(255,0,0,.8)'; ctx.lineWidth=3; ctx.strokeRect(0,270,940,980);}
+}
+// ---------------- frame ----------------
+function draw(tr){
+  const t=((tr%END)+END)%END;
+  ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over'; ctx.filter='none'; ctx.shadowColor='transparent';
+  const c=cam(t), W=tv('W',t), s=pose(t);
+  drawRoom(t,c,W);
+  setCam(c);
+  drawChair(t,s); drawLegs(s);
+  const glowAll=ss(12.6,13.2,t)*(t<RESET?1:0);
+  const hA=clamp((1-s.dua)*1.6);
+  drawArm(s,false); drawHand3D(s,false,t);
+  drawTorso(s); drawLap(s); drawStack(s,t,glowAll);
+  drawTable(t,W); drawLoose(t); drawPile(t); drawCalc(t,s);
+  drawFlights(t);
+  drawNeck(s);
+  drawHead(s,t);
+  drawArm(s,true); drawHand3D(s,true,t); drawPen(s);
+  
+  drawFalling(t);
+  drawLampLight(t,c,W); drawSunBeams(t,W);
+  grade(t,c,s);
+  setCam(c); drawGlow(s,t);
+  drawText(t,toScr(c,...mouthWorld(s,t)));
+}
+// ---------------- probes for the glitch scan and the sound ----------------
+function probe(t){
+  const c=cam(t), s=pose(t); const pts={};
+  const S=(x,y)=>toScr(c,x,y);
+  pts.head=S(...s.hc); pts.sh=S(...s.S); pts.top=S(...s.top); pts.hn=S(...s.hn); pts.hf=S(...s.hf);
+  pts.en=S(...elbowOf(s,true)); pts.ef=S(...elbowOf(s,false));
+  for(let i=0;i<NB;i++){ if(onBack(i,t)){const q=stackSlot(s,i,t); pts['b'+i]=S(q[0],q[1]);} else {const f=flight(i,t); if(f) pts['b'+i]=S(f.x,f.y); else { for(const w of [1,2]){const b=bundleState(t,w); if(b&&i>=b.k&&i<b.k+b.n){const q=bundleMembers(b,w===1?T1:T2)[i-b.k]; pts['b'+i]=S(q.x,q.y);}} } } }
+  pts.calc=S(CALC.x,CALC.y-Math.sin(Math.PI*s.flip)*58);
+  return {t,cam:[c.Z,c.CX,c.CY],pts,flip:s.flip,f:s.f,ang:s.ang};
+}
+function events(){
+  const ev=[];
+  for(const k of TAPS) ev.push({type:'tap',t:k});
+  ev.push({type:'fall1',t:.2,land:T1}); ev.push({type:'fall2',t:3.0,land:T2});
+  for(let i=0;i<NB;i++){const d=DEP(i); ev.push({type:'lift',t:d,i}); ev.push({type:'land',t:d+LIFT+FLY,i});}
+  ev.push({type:'flip',t:10.2,land:10.72});
+  for(let k=0;k<NB;k++){ev.push({type:'lev',t:levStart(k)}); ev.push({type:'gold',t:goldStart(k)}); ev.push({type:'fade',t:fadeStart(k)});}
+  LOOSE.forEach((_,m)=>{ev.push({type:'gold',t:GOLD0+(NB+m)*.08}); ev.push({type:'fade',t:FADE0+(NB*.5+m)*.07});});
+  for(const D of DHIKR) ev.push({type:'dhikr',t:D});
+  const cur={type:'curves',dt:.05,W:[],F:[]}; for(let t=0;t<=END+1e-6;t+=.05){cur.W.push(+tv('W',t).toFixed(4)); cur.F.push(+tv('lean',t).toFixed(4));} ev.push(cur);
+  return ev;
+}
+window.draw=draw; window.events=events; window.probe=probe; window.REAL_END=()=>END; window.tv=tv;
+window.ready=(async()=>{await document.fonts.load('88px AmiriQ'); await document.fonts.load('italic 58px CormI'); await document.fonts.load('30px Corm'); await document.fonts.load('600 19px InterU'); return true;})();
+</script></body></html>
