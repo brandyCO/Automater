@@ -1,0 +1,551 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:'AmiriQ';src:url(amiri.woff2) format('woff2');}
+@font-face{font-family:'Corm';src:url(corm.woff2) format('woff2');}
+@font-face{font-family:'CormI';src:url(cormi.woff2) format('woff2');}
+@font-face{font-family:'InterU';src:url(inter.otf) format('opentype');}
+html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}
+</style></head><body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// Snoozed (2:152). One continuous take, deterministic draw(t), loops at END.
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const END=40.9, W_=1080, H_=1920;
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const lerp=(a,b,u)=>a+(b-a)*u;
+const sm=u=>{u=clamp(u);return u*u*u*(u*(u*6-15)+10);};
+const inv=(a,b,t)=>clamp((t-a)/(b-a));
+const ss=(a,b,t)=>sm(inv(a,b,t));
+const bell=(a,b,t)=>{const m=(a+b)/2;return ss(a,m,t)*(1-ss(m,b,t));};
+const EZ={io:sm, lin:u=>u, o:u=>1-Math.pow(1-u,3), i:u=>u*u*u, o2:u=>Math.sin(u*Math.PI/2), q:u=>u<.5?2*u*u:1-2*(1-u)*(1-u)};
+function K(keys,t){
+  if(t<=keys[0][0]) return keys[0][1];
+  for(let i=0;i<keys.length-1;i++){const a=keys[i],b=keys[i+1]; if(t<=b[0]){const u=(t-a[0])/(b[0]-a[0]); return lerp(a[1],b[1],(EZ[b[2]||'io'])(u));}}
+  return keys[keys.length-1][1];
+}
+function KV(keys,t){
+  if(t<=keys[0][0]) return keys[0][1].slice();
+  for(let i=0;i<keys.length-1;i++){const a=keys[i],b=keys[i+1]; if(t<=b[0]){const u=(EZ[b[2]||'io'])((t-a[0])/(b[0]-a[0])); return a[1].map((v,k)=>lerp(v,b[1][k],u));}}
+  return keys[keys.length-1][1].slice();
+}
+function KL(keys,t){return Math.exp(K(keys.map(k=>[k[0],Math.log(k[1]),k[2]]),t));}
+const mixc=(a,b,u)=>[lerp(a[0],b[0],u),lerp(a[1],b[1],u),lerp(a[2],b[2],u)];
+const rgb=(c,a=1)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const hx=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+function rng(seed){let s=seed>>>0;return()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296;};}
+const D2R=Math.PI/180;
+const nrm=v=>{const l=Math.hypot(...v)||1;return v.map(x=>x/l);};
+function rr(x,y,w,h,r){ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();}
+
+// ---------------- timeline ----------------
+const T={tap1:.95, hit1:1.0, ring2:3.2, tap2:4.6, hit2:4.68, ring3:7.9, tap3:9.0, ring4:10.0, tap4:10.62, ring5:11.5,
+  hov:[12.25,13.95], stop:14.3, eff1:[14.55,15.3], eff2:[15.45,17.3], stand:[17.4,18.1], kneel:[18.75,19.55], sujood:[19.6,20.45], hush:[20.45,21.3], ANS:21.3,
+  rise:[26.0,28.3], smile:[27.8,29.8], held:[30.2,36.2], glide:[36.2,39.4], reset:39.5, night:[38.0,40.0], ring0:39.85};
+const RINGS=[[T.ring0-END,T.tap1,'5:10'],[T.ring2,T.tap2,'5:19'],[T.ring3,T.tap3,'5:28'],[T.ring4,T.tap4,'5:37'],[T.ring5,T.stop,'5:46'],[T.ring0,T.tap1+END,'5:10']];
+const TAPS=[[T.tap1,'s'],[T.tap2,'s'],[T.tap3,'s'],[T.tap4,'s'],[T.stop,'x'],[T.tap1+END,'s']];
+const HITS=[[T.hit1,60],[T.hit2,95]];
+function hitOff(t){let d=0;for(const[h,a]of HITS){const x=t-h;if(x<0)continue;d+=x<.1?a*sm(x/.1):a*Math.exp(-(x-.1)*3.2)*Math.cos((x-.1)*5.2);}return d;}
+// the alarm: which ring is live, and a soft on/off buzz pattern
+function ringState(t){for(const[a,b,lab]of RINGS){if(t>=a&&t<b) return {on:1,lab,a,b};} return null;}
+function buzz(t){const r=ringState(t); if(!r) return 0; const u=(t-r.a)%0.95; return ss(0,.04,u)*(1-ss(.5,.56,u))*ss(r.a,r.a+.05,t)*(1-ss(r.b-.03,r.b,t));}
+function lastLabel(t){let lab='5:10';for(const[a,b,l]of RINGS){if(t>=a-.3) lab=l;} return lab;}
+
+// ---------------- world (3D-ish: screen y = y + 0.35 z) ----------------
+const ZK=.35, proj=p=>[p[0],p[1]+ZK*p[2]];
+const MAT=985, FLOOR=1110, PHONE=[272,816], SNOOZE=[272,846], STOP=[272,874];
+
+// heaviness of the blanket: the staircase (two blows, then smaller settles)
+function heavy(t){
+  let h=K([[0,.32],[T.hit1,.32],[T.hit1+.16,.66,'o'],[T.hit2,.66],[T.hit2+.18,1.0,'o'],[T.tap3,1.0],[T.tap3+.6,1.07],[T.tap4,1.07],[T.tap4+.6,1.13]],t);
+  for(const[hh,a]of [[T.hit1,.10],[T.hit2,.16],[T.tap3,.03],[T.tap4,.025]]){const x=t-hh-.14; if(x>0) h+=a*Math.exp(-x*4.2)*Math.sin(x*15);}
+  return h;
+}
+// a ripple that runs down the blanket from his shoulder to his feet after each blow
+function ripple(sAlong,t){let r=0;for(const[hh,a]of [[T.hit1,9],[T.hit2,14],[T.tap3,3],[T.tap4,2.5]]){const x=t-hh-.08; if(x<=0||x>1.6) continue; const c=-40+x*520; r+=a*Math.exp(-((sAlong-c)**2)/(2*60*60))*Math.exp(-x*1.6)*sm(x/.12);} return r;}
+// how hard he reaches for the phone (curls his body toward it)
+function reachAmt(t){return Math.max(bell(-.9,1.9,t)*1, bell(3.5,5.5,t)*.95, bell(8.1,9.6,t)*.75, bell(10.0,11.2,t)*.55, ss(11.7,12.25,t)*(1-ss(14.3,14.9,t))*.85);}
+
+// ---------------- the man's pose ----------------
+const L=135, HD=81, RH=60, SHW=82, UA=120, FA=114, TH=108, SH=102;
+function pose(t){
+  const s={t};
+  const ra=reachAmt(t); s.ra=ra;
+  const hv=heavy(t); s.hv=hv;
+  // torso rotation in the screen plane: -90 lying on his side facing us (head to the left), 0 upright
+  s.rot=K([[0,-90],[T.eff1[0],-90],[T.eff1[0]+.42,-79,'q'],[T.eff1[1],-90,'io'],[T.eff2[0],-90],[T.eff2[0]+.75,-52,'q'],[T.eff2[1]-.15,0],[END,0]],t)-7*ra;
+  // bow toward us (radians): 0 upright, about 1.75 in sujood
+  s.bow=K([[0,0],[T.eff2[1],0],[T.stand[0]+.3,.32],[T.stand[1],0],[T.kneel[0],0],[T.kneel[0]+.4,.12],[T.kneel[1],.05],[T.sujood[0]+.15,.35],[T.sujood[1],1.76,'io'],[T.rise[0],1.76],[T.rise[1],.06],[END,.06]],t);
+  const H=KV([[0,[656,910,0]],[T.eff1[0],[656,910,0]],[T.eff1[0]+.42,[652,904,0],'q'],[T.eff1[1],[656,910,0]],[T.eff2[0],[656,910,0]],[T.eff2[0]+.75,[654,930,0]],[T.eff2[1]-.15,[652,972,96]],[T.eff2[1],[651,973,105]],
+    [T.stand[0],[651,973,105]],[T.stand[0]+.3,[650,962,170],'i'],[T.stand[1],[646,900,300],'o'],[T.kneel[0],[646,900,300]],[T.kneel[0]+.35,[643,950,286],'i'],[T.kneel[1],[640,1002,252],'o'],[T.sujood[0],[640,1002,252]],[T.sujood[1],[640,1012,228]],[T.rise[0],[640,1012,228]],[T.rise[1],[640,1060,214]],[END,[640,1060,214]]],t);
+  const lying=clamp(-s.rot/90);
+  H[0]-=14*ra; H[1]+=(3+9*Math.max(hv,0))*lying;
+  // breathing
+  const rate=K([[0,.27],[T.hit2,.3],[T.stop,.32],[T.eff2[1],.42],[T.sujood[1],.3],[T.ANS,.22],[26,.17],[END,.2]],t);
+  s.br=Math.sin(2*Math.PI*phaseInt(t))*K([[0,.6],[T.hit2,.9],[T.eff2[1],1.2],[T.ANS,.7],[24,1.1],[28,.6],[END,.6]],t);
+  s.H=H; const r=s.rot*D2R, b=s.bow;
+  const Rz=v=>[v[0]*Math.cos(r)-v[1]*Math.sin(r), v[0]*Math.sin(r)+v[1]*Math.cos(r), v[2]];
+  s.A=Rz([0,-Math.cos(b),Math.sin(b)]); s.Wd=Rz([1,0,0]); s.D=Rz([0,Math.sin(b),Math.cos(b)]);
+  const add=(p,v,k)=>[p[0]+v[0]*k,p[1]+v[1]*k,p[2]+v[2]*k];
+  s.L2W3=(lx,ly,lz=0)=>add(add(add(H,s.Wd,lx),s.A,-ly),s.D,lz);
+  s.neck=add(H,s.A,L*(1+.006*s.br));
+  s.head=add(s.neck,s.A,HD); s.head[1]+=lying*(3*Math.max(hv,0)) ; // his head sinks into the pillow
+  // legs: thigh and shin directions (3D), the same for both legs with a little spread
+  s.thigh=nrm(KV([[0,[1,.12,0]],[T.eff2[0]+.95,[1,.1,0]],[T.eff2[1],[.1,.04,1]],[T.stand[0],[.1,.04,1]],[T.stand[1],[0,1,.02]],[T.kneel[0],[0,1,.02]],[T.kneel[0]+.35,[0,1,.35]],[T.kneel[1],[0,1,.22]],[T.sujood[0],[0,1,.22]],[T.sujood[1],[0,.86,.5]],[T.rise[0],[0,.86,.5]],[T.rise[1],[0,.34,1]],[END,[0,.34,1]]],t));
+  s.shin=nrm(KV([[0,[1,.06,0]],[T.eff2[0]+.95,[1,.05,0]],[T.eff2[1],[.02,1,.1]],[T.stand[0],[.02,1,.1]],[T.stand[1],[0,1,0]],[T.kneel[0],[0,1,0]],[T.kneel[0]+.4,[0,.7,-.5]],[T.kneel[1],[0,.12,-1]],[END,[0,.12,-1]]],t));
+  // face
+  s.lid=clamp(K([[0,.84],[T.hit1-.05,.86],[T.hit1+.1,1],[T.ring2+.25,1],[T.ring2+.55,.88],[T.tap2,.9],[T.hit2+.1,1],[T.ring3+.4,1],[T.ring3+.7,.94],[T.tap3+.3,1],[T.ring4+.3,1],[T.ring4+.5,.96],[T.tap4+.3,1],[T.ring5+.25,1],[T.ring5+.65,.82],[T.hov[0]+.3,.56],[T.hov[1],.5],[T.stop,.52],
+    [T.eff1[0]+.2,.8],[T.eff1[1],.66],[T.eff2[0]+.3,.86],[T.eff2[1],.4],[T.stand[1],.5],[T.kneel[1],.45],[T.sujood[0]+.3,.7],[T.sujood[1],1],[T.rise[1]-.6,1],[END,1]],t)+blink(t));
+  s.lookX=K([[0,0],[T.eff2[1],0],[T.eff2[1]+.3,-.25],[T.kneel[0]+.3,0],[END,0]],t);
+  s.lookY=K([[0,-.75],[T.eff2[0],-.75],[T.eff2[0]+.6,.2],[T.eff2[1],.55],[T.stand[1],.95],[END,.95]],t);
+  s.brow=K([[0,.65],[T.hit2,.75],[T.hit2+.3,.95],[T.hov[0],.85],[T.hov[1],.95],[T.eff2[1],.75],[T.kneel[1],.6],[T.ANS,.6],[T.ANS+3,.15],[T.rise[1],0],[END,0]],t);
+  s.smile=K([[0,0],[T.smile[0],0],[T.smile[1],.75],[END,.75]],t);
+  s.tilt=K([[0,-5],[T.eff2[0],-5],[T.eff2[1],0],[T.stand[1],2],[T.kneel[1],-2],[T.rise[1]+1,2],[END,2]],t);
+  s.pitch=clamp(b/1.62)+K([[0,0],[T.kneel[1],0],[T.kneel[1]+.2,.1],[T.sujood[0]+.1,.12],[T.rise[1]-.3,0],[T.rise[1]+.6,.14],[END,.14]],t)*(1-clamp(b/1.62));
+  s.lying=lying;
+  return s;
+}
+function phaseInt(t){let ph=0;const n=Math.ceil(Math.max(t,0)/.05),dt=Math.max(t,0)/Math.max(1,n);for(let i=0;i<n;i++){const x=i*dt;ph+=K([[0,.27],[T.hit2,.3],[T.stop,.32],[T.eff2[1],.42],[T.sujood[1],.3],[T.ANS,.22],[26,.17],[END,.2]],x)*dt;}return ph;}
+function blink(t){let b=0;for(const bt of [T.hov[0]+.55,T.eff2[1]+.25,T.kneel[0]+.4]){b=Math.max(b,bell(bt,bt+.22,t));}return b;}
+
+// ---------------- hands ----------------
+// keys mix world points {w}, 3D points {p3}, body-local points [lx,ly,lz], and the blanket edge {f:'edge'}
+let CURS=null;
+function toW(v){ if(v.w) return v.w; if(v.p3) return proj(v.p3); if(v.f==='edge') return blanketEdge(CURS); return proj(CURS.L2W3(v[0],v[1],v[2]||0)); }
+function KH(keys,t){
+  let i=1; if(t<=keys[0][0]) return toW(keys[0][1]); while(i<keys.length && t>keys[i][0]) i++;
+  if(i>=keys.length) return toW(keys[keys.length-1][1]);
+  const [a,va]=keys[i-1],[b,vb,e]=keys[i]; const u=(EZ[e||'io'])((t-a)/(b-a)); const A=toW(va), B=toW(vb); return [lerp(A[0],B[0],u),lerp(A[1],B[1],u)];
+}
+function puff(t){return 16+26*Math.max(heavy(t),0);}
+function handsAt(s,t){
+  const P=puff(t);
+  const rest=[0,0,0]; // replaced below by a point on top of the blanket
+  const onBl=(ly)=>[SHW-12+P,ly+172,0]; const REST={w:[404,842]};
+  const A=KH([[-1.25,REST],[-0.5,{w:[372,826]}],[T.tap1-.08,{w:[SNOOZE[0]+6,SNOOZE[1]+4]}],[T.tap1+.12,{w:[SNOOZE[0]+4,SNOOZE[1]+8]}],[T.tap1+.8,{w:[360,832]}],[2.4,REST],
+    [T.ring2+.5,REST],[T.ring2+1.0,{w:[372,830]}],[T.tap2-.06,{w:[SNOOZE[0]+6,SNOOZE[1]+4]}],[T.tap2+.15,{w:[SNOOZE[0]+5,SNOOZE[1]+9]}],[T.tap2+.9,{w:[366,836]}],[6.6,REST],
+    [T.ring3+.3,REST],[T.ring3+.75,{w:[380,850]}],[T.tap3-.08,{w:[SNOOZE[0]+7,SNOOZE[1]+6]},'q'],[T.tap3+.15,{w:[SNOOZE[0]+7,SNOOZE[1]+12]}],[T.tap3+.8,{w:[384,880]}],
+    [T.ring4+.15,{w:[384,880]}],[T.tap4-.06,{w:[SNOOZE[0]+9,SNOOZE[1]+10]},'q'],[T.tap4+.15,{w:[SNOOZE[0]+10,SNOOZE[1]+16]}],[T.tap4+.6,{w:[392,884]}],
+    [T.ring5+.35,{w:[392,884]}],[T.hov[0],{w:[SNOOZE[0]+8,SNOOZE[1]-14]}],[T.hov[0]+.5,{w:[SNOOZE[0]+7,SNOOZE[1]-11]}],[T.hov[1],{w:[SNOOZE[0]+7,SNOOZE[1]-10]}],
+    [T.stop-.12,{w:[STOP[0]+7,STOP[1]-2]}],[T.stop+.08,{w:[STOP[0]+6,STOP[1]+3]}],[T.eff1[0]+.2,{w:[396,880]}],[T.eff2[0]+.05,{w:[400,882]}],[T.eff2[0]+.4,onBl(-232),'q'],[T.eff2[0]+.8,[96,-6,20],'q'],[T.eff2[0]+1.35,{w:[850,905]},'io'],[T.eff2[1]-.1,{w:[742,1012]}],[T.stand[0]+.15,{w:[742,1012]}],[T.stand[1]-.1,[62,8,30]],[T.stand[1]+.25,[-8,-70,56]],[T.kneel[0],[-8,-70,56]],[T.kneel[0]+.45,[56,40,40]],[T.kneel[1],[50,58,46]],
+    [T.sujood[0]+.1,[50,58,46]],[T.sujood[1]-.35,{p3:[742,1106,404]}],[T.rise[0],{p3:[742,1106,404]}],[T.rise[1],[46,10,86]],[END+5,[46,10,86]]],t);
+  const B=KH([[-2,[-40,-60,40]],[T.eff1[0],[-40,-60,40]],[T.eff1[0]+.3,{w:[560,980]}],[T.eff1[1],{w:[560,982]}],[T.eff2[0],{w:[566,982]}],[T.eff2[0]+.7,{w:[578,990]}],[T.eff2[1]-.15,{w:[560,1012]}],[T.stand[0]+.15,{w:[560,1012]}],[T.stand[1]-.1,[-62,8,30]],[T.stand[1]+.25,[6,-64,62]],[T.kneel[0],[6,-64,62]],[T.kneel[0]+.45,[-56,40,40]],[T.kneel[1],[-50,58,46]],
+    [T.sujood[0]+.1,[-50,58,46]],[T.sujood[1]-.35,{p3:[538,1106,404]}],[T.rise[0],{p3:[538,1106,404]}],[T.rise[1],[-46,10,86]],[END+5,[-46,10,86]]],t);
+  return {A,B};
+}
+
+// ---------------- camera ----------------
+const CU=[180,812,2.8];
+function cam(t){
+  const k=[[0,CU],[.35,CU],[2.7,[470,860,1.72]],[5.4,[482,866,1.68]],[8.0,[560,958,1.08]],[9.3,[560,958,1.08]],[11.7,[372,862,2.0]],[T.stop,[376,862,2.08]],[T.eff2[0]+.4,[470,880,1.62]],[T.eff2[1],[560,940,1.36]],
+    [T.stand[1],[600,968,1.42]],[T.kneel[0],[602,976,1.44]],[T.kneel[1],[612,1020,1.55]],[T.sujood[1],[624,1062,1.8]],[T.hush[1],[624,1060,1.84]],[T.ANS+1.5,[612,1040,1.6]],[29.4,[570,990,1.06]],[T.glide[0],[570,990,1.06]],[T.glide[1],CU],[END,CU]];
+  const zk=k.map(e=>[e[0],e[1][2],e[2]]), Z=KL(zk,t);
+  let CX=K(k.map(e=>[e[0],e[1][0]]),t), CY=K(k.map(e=>[e[0],e[1][1]]),t);
+  // keep the camera centre moving in step with the zoom on the long glide (no swing)
+  if(t>T.glide[0]){const u=(1/Z-1/1.06)/(1/CU[2]-1/1.06); CX=lerp(570,CU[0],u); CY=lerp(990,CU[1],u);}
+  const drift=(1-ss(T.ANS,T.ANS+3,t))*ss(.5,2,t);
+  CX+=(2.2*Math.sin(t*.61)+1.3*Math.sin(t*1.37+1))*drift/Z; CY+=(1.8*Math.sin(t*.53+2)+1.1*Math.sin(t*1.11))*drift/Z;
+  CY-=hitOff(t)/Z*.6;
+  return {Z,CX,CY};
+}
+function setCam(c){ctx.setTransform(c.Z,0,0,c.Z,540-c.CX*c.Z,960-c.CY*c.Z);}
+const toScr=(c,x,y)=>[540+(x-c.CX)*c.Z,960+(y-c.CY)*c.Z];
+
+// ---------------- light ----------------
+function warm(t){return K([[0,0],[T.ANS+.6,0],[31,1,'o2'],[T.night[0],1],[T.night[1],0],[END,0]],t);}
+function dawnWin(t){return K([[0,0],[T.ANS+1.2,0],[29,1,'o2'],[T.night[0],1],[T.night[1],0],[END,0]],t);}
+function goldPhone(t){return ss(T.ANS,T.ANS+.7,t)*(1-ss(T.night[0]+.2,T.night[0]+1.4,t));}
+function spread(t){return K([[0,0],[T.ANS+.3,0],[T.ANS+7.5,1,'o']],t)*(1-ss(T.night[0],T.night[1],t));}
+function screenLit(t){ // the cold alarm screen
+  let v=0; for(const[a,b]of RINGS){ if(t>=a-.25&&t<b+1.2){ v=Math.max(v, ss(a-.25,a+.05,t)*(1-ss(b+.15,b+.75,t))); } }
+  return v;
+}
+
+// ---------------- palette ----------------
+const P={skin:hx('#e3a87b'),skinD:hx('#c98b60'),hair:hx('#221710'),beard:hx('#2a1b13'),shirt:hx('#8f969f'),shirtD:hx('#767c86'),pants:hx('#3b4253'),pantsD:hx('#2d3342')};
+const fc=(c,a=1)=>rgb(c,a);
+const STARS=(()=>{const R=rng(7),a=[];for(let i=0;i<30;i++)a.push([R(),R(),R()]);return a;})();
+
+// ---------------- room ----------------
+const WIN=[28,430,280,340];
+function drawRoom(t,W,c){
+  setCam(c);
+  // wall
+  const g=ctx.createLinearGradient(0,200,0,1100); g.addColorStop(0,rgb(mixc([78,90,128],[206,146,104],W))); g.addColorStop(1,rgb(mixc([96,108,142],[226,170,120],W)));
+  ctx.fillStyle=g; ctx.fillRect(-1200,-600,3600,1700);
+  // window: night sky to dawn
+  const [wx,wy,ww,wh]=WIN, Dw=dawnWin(t);
+  ctx.fillStyle=rgb(mixc([196,190,182],[250,236,214],W)); rr(wx-16,wy-16,ww+32,wh+32,10); ctx.fill();
+  const sky=ctx.createLinearGradient(0,wy,0,wy+wh); sky.addColorStop(0,rgb(mixc([14,22,52],[150,170,214],Dw))); sky.addColorStop(.55,rgb(mixc([24,36,76],[250,196,160],Dw))); sky.addColorStop(1,rgb(mixc([38,54,98],[255,226,170],Dw)));
+  ctx.fillStyle=sky; ctx.fillRect(wx,wy,ww,wh);
+  ctx.save(); ctx.beginPath(); ctx.rect(wx,wy,ww,wh); ctx.clip();
+  if(Dw>0){const sx=wx+ww*.62, sy=wy+wh*1.02-Dw*60; const sg=ctx.createRadialGradient(sx,sy,0,sx,sy,260); sg.addColorStop(0,`rgba(255,246,214,${.95*Dw})`); sg.addColorStop(.18,`rgba(255,214,150,${.6*Dw})`); sg.addColorStop(1,'rgba(255,190,130,0)'); ctx.fillStyle=sg; ctx.fillRect(wx,wy,ww,wh);}
+  for(const [a,b,cc] of STARS){const tw=.5+.5*Math.sin(t*(1+cc*2)+cc*20); ctx.fillStyle=`rgba(255,250,235,${(.3+.5*tw*cc)*(1-Dw)})`; ctx.beginPath(); ctx.arc(wx+8+a*(ww-16),wy+8+b*(wh*.62),1.1+cc*1.2,0,7); ctx.fill();}
+  // a thin crescent that fades into the dawn
+  ctx.globalAlpha=1-Dw*.9; ctx.fillStyle='#fff3d6'; ctx.beginPath(); ctx.arc(wx+ww*.28,wy+wh*.24,20,0,7); ctx.fill(); ctx.fillStyle=rgb(mixc([16,25,56],[160,176,214],Dw)); ctx.beginPath(); ctx.arc(wx+ww*.28+8,wy+wh*.24-6,18,0,7); ctx.fill(); ctx.globalAlpha=1;
+  // far rooftops
+  ctx.fillStyle=rgb(mixc([12,18,40],[150,110,110],Dw),.95); const Rb=rng(5); let x=wx-20; while(x<wx+ww){const w=40+Rb()*60,h=30+Rb()*60; ctx.fillRect(x,wy+wh-h,w,h); x+=w+4;}
+  ctx.restore();
+  ctx.fillStyle=rgb(mixc([196,190,182],[250,236,214],W)); ctx.fillRect(wx+ww/2-5,wy,10,wh); ctx.fillRect(wx,wy+wh*.42-5,ww,10);
+  ctx.fillStyle=rgb(mixc([150,146,140],[214,196,176],W)); ctx.fillRect(wx-24,wy+wh+14,ww+48,14);
+  // curtains
+  for(const sd of [-1,1]){const cx=sd<0?wx-30:wx+ww+30; ctx.fillStyle=rgb(mixc([66,70,102],[206,170,150],W));
+    ctx.beginPath(); ctx.moveTo(cx-34*sd,wy-40); ctx.quadraticCurveTo(cx+20*sd,wy+140,cx+4*sd,wy+wh+70); ctx.lineTo(cx-38*sd,wy+wh+70); ctx.quadraticCurveTo(cx-46*sd,wy+160,cx-40*sd,wy-40); ctx.closePath(); ctx.fill();}
+  ctx.fillStyle=rgb(mixc([50,54,74],[170,140,120],W)); ctx.fillRect(wx-90,wy-48,ww+180,10);
+  // floor (from the back wall at z -150)
+  const fy=FLOOR-.35*150;
+  const fg=ctx.createLinearGradient(0,fy,0,2000); fg.addColorStop(0,rgb(mixc([58,62,86],[150,96,66],W))); fg.addColorStop(1,rgb(mixc([40,44,62],[104,66,48],W)));
+  ctx.fillStyle=fg; ctx.fillRect(-1200,fy,3600,1400);
+  ctx.fillStyle=rgb(mixc([34,38,56],[150,110,84],W)); ctx.fillRect(-1200,fy-12,3600,14);
+  // floor boards
+  ctx.strokeStyle=`rgba(0,0,0,${.10})`; ctx.lineWidth=2; for(let k=1;k<9;k++){const y=fy+Math.pow(k/9,1.6)*900; ctx.beginPath(); ctx.moveTo(-1200,y); ctx.lineTo(2400,y); ctx.stroke();}
+  drawNightstand(t,W);
+  drawPhone(t,W);
+}
+function drawNightstand(t,W){
+  const top=900;
+  ctx.fillStyle=rgb(mixc([70,58,58],[168,118,84],W)); rr(192,top,146,250,8); ctx.fill();
+  ctx.fillStyle=rgb(mixc([92,78,76],[196,146,104],W)); rr(186,top-10,158,20,8); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=3; rr(206,top+40,118,80,6); ctx.stroke();
+  ctx.fillStyle='rgba(0,0,0,.28)'; rr(250,top+74,30,8,4); ctx.fill();
+  // little phone stand
+  ctx.fillStyle=rgb(mixc([30,32,40],[90,70,60],W)); rr(244,top-18,56,14,5); ctx.fill();
+}
+function drawPhone(t,W){
+  const lit=screenLit(t), gold=goldPhone(t), bz=buzz(t);
+  const jx=Math.sin(t*2*Math.PI*31)*1.2*bz, jr=Math.sin(t*2*Math.PI*23)*.012*bz;
+  ctx.save(); ctx.translate(PHONE[0]+jx,PHONE[1]); ctx.rotate(-.04+jr);
+  ctx.fillStyle='#0f1217'; rr(-46,-88,92,176,15); ctx.fill();
+  ctx.strokeStyle='rgba(170,190,215,.28)'; ctx.lineWidth=2; rr(-46,-88,92,176,15); ctx.stroke();
+  // screen
+  ctx.save(); rr(-41,-83,82,166,11); ctx.clip();
+  ctx.fillStyle='#07090c'; ctx.fillRect(-50,-90,100,180);
+  if(lit>0){const g=ctx.createLinearGradient(0,-83,0,83); g.addColorStop(0,`rgba(44,58,92,${lit})`); g.addColorStop(1,`rgba(18,24,40,${lit})`); ctx.fillStyle=g; ctx.fillRect(-50,-90,100,180);}
+  if(gold>0){const g=ctx.createRadialGradient(0,10,0,0,10,120); g.addColorStop(0,`rgba(255,240,200,${gold})`); g.addColorStop(.5,`rgba(255,200,120,${gold})`); g.addColorStop(1,`rgba(240,160,80,${gold})`); ctx.fillStyle=g; ctx.fillRect(-50,-90,100,180);}
+  // alarm UI
+  if(lit>0){const lab=lastLabel(t); ctx.globalAlpha=lit; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle='#b9c4da'; ctx.font='500 11px InterU'; ctx.fillText('Fajr',0,-55);
+    ctx.fillStyle='#ffffff'; ctx.font='300 33px InterU'; ctx.fillText(lab,0,-30);
+    // which button is being pressed
+    let pS=0,pX=0; for(const[tt,k]of TAPS){const b=bell(tt-.1,tt+.25,t); if(k==='s')pS=Math.max(pS,b); else pX=Math.max(pX,b);}
+    ctx.save(); ctx.translate(0,30); ctx.scale(1-.08*pS,1-.08*pS); ctx.fillStyle=rgb(mixc([242,154,46],[196,112,30],pS)); rr(-33,-12,66,24,12); ctx.fill(); ctx.fillStyle='#fff'; ctx.font='600 11px InterU'; ctx.fillText('Snooze',0,.5); ctx.restore();
+    ctx.save(); ctx.translate(0,58); ctx.scale(1-.08*pX,1-.08*pX); ctx.fillStyle=rgb(mixc([58,66,84],[96,104,124],pX)); rr(-25,-9,50,18,9); ctx.fill(); ctx.fillStyle='#dfe5ef'; ctx.font='500 9px InterU'; ctx.fillText('Stop',0,.5); ctx.restore();
+    ctx.globalAlpha=1;}
+  if(gold>0){ctx.globalAlpha=gold*.85; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='rgba(120,60,10,.75)'; ctx.font='300 33px InterU'; ctx.fillText('5:46',0,-30); ctx.globalAlpha=1;}
+  ctx.restore();
+  ctx.restore();
+  // the buzz: two soft motion arcs either side
+  if(bz>.02){ctx.save(); ctx.strokeStyle=`rgba(200,220,255,${.45*bz})`; ctx.lineWidth=3; ctx.lineCap='round';
+    for(const sd of [-1,1]) for(const k of [0,1]){const r=62+k*14; ctx.beginPath(); ctx.arc(PHONE[0],PHONE[1]-10,r,sd<0?Math.PI*.88:-Math.PI*.12,sd<0?Math.PI*1.12:Math.PI*.12); ctx.stroke();}
+    ctx.restore();}
+}
+// ---------------- bed ----------------
+function drawBed(t,W,s){
+  const hv=Math.max(heavy(t),0)*s.lying*(1-ss(T.eff2[0],T.eff2[0]+1.2,t));
+  const sag=6+10*hv;
+  const sheet=mixc([150,160,186],[246,232,214],W), sheetD=mixc([118,128,156],[222,200,180],W);
+  // headboard
+  ctx.fillStyle=rgb(mixc([66,54,54],[160,108,74],W)); rr(338,700,36,420,12); ctx.fill();
+  ctx.fillStyle=rgb(mixc([80,66,64],[184,128,90],W)); rr(342,708,14,404,7); ctx.fill();
+  // mattress top surface (z -150..120) with a soft dip under him
+  const yb=MAT-.35*150, yf=MAT+.35*120;
+  ctx.fillStyle=rgb(sheetD); ctx.beginPath(); ctx.moveTo(372,yb); ctx.lineTo(1060,yb); ctx.lineTo(1060,yf);
+  ctx.quadraticCurveTo(820,yf+sag*.5,650,yf+sag*.2); ctx.quadraticCurveTo(500,yf,372,yf); ctx.closePath(); ctx.fill();
+  // mattress front face and bed frame
+  ctx.fillStyle=rgb(sheet); ctx.beginPath(); ctx.moveTo(372,yf); ctx.quadraticCurveTo(500,yf,650,yf+sag*.2); ctx.quadraticCurveTo(820,yf+sag*.5,1060,yf); ctx.lineTo(1060,yf+64); ctx.lineTo(372,yf+64); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.08)'; ctx.fillRect(372,yf+48,688,16);
+  ctx.fillStyle=rgb(mixc([60,50,50],[150,100,70],W)); rr(360,yf+60,712,30,8); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.25)'; ctx.fillRect(372,yf+90,688,8);
+  ctx.fillStyle=rgb(mixc([50,42,42],[130,88,62],W)); rr(380,yf+88,26,FLOOR+.35*120-yf-88,5); ctx.fill(); rr(1026,yf+88,26,FLOOR+.35*120-yf-88,5); ctx.fill();
+  // pillow (his head pushes into it when the blanket is heavy)
+  const pd=4*hv;
+  ctx.fillStyle=rgb(mixc([196,204,222],[255,248,236],W)); ctx.beginPath();
+  ctx.moveTo(392,905); ctx.quadraticCurveTo(388,872,420,870-pd); ctx.quadraticCurveTo(470,880+pd*1.5,520,870-pd); ctx.quadraticCurveTo(552,872,548,905); ctx.quadraticCurveTo(552,960,520,968); ctx.lineTo(420,968); ctx.quadraticCurveTo(388,960,392,905); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle=rgb(mixc([160,170,196],[226,214,200],W),.8); ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(412,884); ctx.quadraticCurveTo(470,894,528,884); ctx.stroke();
+}
+// ---------------- prayer rug on the floor in front of the bed ----------------
+function drawRug(t,W){
+  const z0=190,z1=470, y0=FLOOR+ZK*z0, y1=FLOOR+ZK*z1;
+  const base=mixc([70,40,52],[156,62,58],W), border=mixc([120,96,70],[226,182,110],W), field=mixc([58,34,46],[134,50,50],W);
+  const q=(a,b,c,d)=>{ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...c); ctx.lineTo(...d); ctx.closePath(); ctx.fill();};
+  ctx.fillStyle='rgba(0,0,0,.2)'; q([516,y0+3],[766,y0+3],[788,y1+5],[494,y1+5]);
+  ctx.fillStyle=rgb(base); q([516,y0],[766,y0],[786,y1],[494,y1]);
+  ctx.fillStyle=rgb(border); q([524,y0+5],[758,y0+5],[776,y1-6],[504,y1-6]);
+  ctx.fillStyle=rgb(field); q([532,y0+10],[750,y0+10],[766,y1-12],[514,y1-12]);
+  // the arch at the near end
+  ctx.strokeStyle=rgb(border); ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(560,y1-14); ctx.lineTo(560,y1-46); ctx.quadraticCurveTo(640,y1-92,720,y1-46); ctx.lineTo(720,y1-14); ctx.stroke();
+  ctx.fillStyle=rgb(border,.8); for(let k=0;k<9;k++){ctx.beginPath(); ctx.arc(504+k*35,y1+1,3,0,7); ctx.fill();}
+}
+
+// ---------------- the man ----------------
+function limbC(A,B,wa,wb,col,colD){
+  const dx=B[0]-A[0],dy=B[1]-A[1],Ln=Math.hypot(dx,dy)||1,nx=-dy/Ln,ny=dx/Ln; const a=wa*.5,b=wb*.5;
+  const p=new Path2D(); p.moveTo(A[0]+nx*a,A[1]+ny*a); p.lineTo(B[0]+nx*b,B[1]+ny*b); p.arc(B[0],B[1],b,Math.atan2(ny,nx),Math.atan2(ny,nx)+Math.PI,dx*ny-dy*nx>0);
+  p.lineTo(A[0]-nx*a,A[1]-ny*a); p.arc(A[0],A[1],a,Math.atan2(-ny,-nx),Math.atan2(-ny,-nx)+Math.PI,dx*ny-dy*nx>0); p.closePath();
+  ctx.fillStyle=colD; ctx.fill(p); ctx.save(); ctx.clip(p); ctx.translate(-2.5,-2.5); ctx.fillStyle=col; ctx.fill(p); ctx.restore();
+}
+function legPts(s,side){
+  const hip=s.L2W3(side*34,4,0); const spread=side*Math.max(0,s.thigh[2])*.22; const kn=[hip[0]+(s.thigh[0]+spread)*TH,hip[1]+s.thigh[1]*TH,hip[2]+s.thigh[2]*TH];
+  const ft=[kn[0]+s.shin[0]*SH,kn[1]+s.shin[1]*SH,kn[2]+s.shin[2]*SH]; return {hip,kn,ft};
+}
+function drawLegs(s){
+  const legs=[-1,1].map(sd=>({sd,...legPts(s,sd)})).sort((a,b)=>(a.kn[2]-b.kn[2])||(a.hip[1]-b.hip[1]));
+  for(const g of legs){const H=proj(g.hip),Kn=proj(g.kn),F=proj(g.ft);
+    // foot: points along the floor, away from the shin
+    const hg=clamp((s.shin[1]-.3)/.5); const fd=nrm([lerp(s.shin[0],0,hg),0,lerp(s.shin[2],1,hg)+.001]);
+    const toe=proj([g.ft[0]+fd[0]*26,g.ft[1],g.ft[2]+fd[2]*26]);
+    limbC(Kn,F,34,30,fc(P.pants),fc(P.pantsD));
+    ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse((F[0]+toe[0])/2,(F[1]+toe[1])/2+2,17,12,Math.atan2(toe[1]-F[1],toe[0]-F[0]),0,7); ctx.fill();
+    limbC(H,Kn,42,36,fc(P.pants),fc(P.pantsD));}
+}
+function torsoParts(s){
+  const H=s.H, n=12, pts=[];
+  for(let i=0;i<=n;i++){const u=i/n; const p=proj([H[0]+s.A[0]*L*u,H[1]+s.A[1]*L*u,H[2]+s.A[2]*L*u]); const w=lerp(70,82,sm(clamp(u*1.6)))*(1-.0*u); pts.push({p,w,u});}
+  const wd=proj([s.Wd[0],s.Wd[1],s.Wd[2]]); const wl=Math.hypot(...wd)||1; const nn=[wd[0]/wl,wd[1]/wl];
+  return {pts,nn};
+}
+function drawTorso(s){
+  const {pts,nn}=torsoParts(s); const br=1+.012*s.br;
+  const path=new Path2D(); path.moveTo(pts[0].p[0]+nn[0]*pts[0].w,pts[0].p[1]+nn[1]*pts[0].w);
+  for(const q of pts) path.lineTo(q.p[0]+nn[0]*q.w*br,q.p[1]+nn[1]*q.w*br);
+  for(let i=pts.length-1;i>=0;i--){const q=pts[i]; path.lineTo(q.p[0]-nn[0]*q.w*br,q.p[1]-nn[1]*q.w*br);} path.closePath();
+  // end caps: the cross-section ellipse (shoulders, hips)
+  const cap=(c,w,dep)=>{const a=proj([s.Wd[0]*w,s.Wd[1]*w,s.Wd[2]*w]), b=proj([s.D[0]*dep,s.D[1]*dep,s.D[2]*dep]); const q=new Path2D(); for(let k=0;k<=40;k++){const th=k/40*Math.PI*2; const x=c[0]+a[0]*Math.cos(th)+b[0]*Math.sin(th), y=c[1]+a[1]*Math.cos(th)+b[1]*Math.sin(th); k?q.lineTo(x,y):q.moveTo(x,y);} q.closePath(); return q;};
+  const top=pts[pts.length-1], bot=pts[0];
+  const body=new Path2D(); body.addPath(path); body.addPath(cap(top.p,top.w*br,44)); body.addPath(cap(bot.p,bot.w,40));
+  // hips in trousers
+  ctx.fillStyle=fc(P.pants); ctx.fill(cap(bot.p,bot.w+2,42));
+  ctx.fillStyle=fc(P.shirt); ctx.fill(body,'nonzero');
+  ctx.save(); ctx.clip(body,'nonzero');
+  // soft side shading across the body
+  const g=ctx.createLinearGradient(top.p[0]-nn[0]*90,top.p[1]-nn[1]*90,top.p[0]+nn[0]*90,top.p[1]+nn[1]*90); g.addColorStop(0,'rgba(0,0,0,.10)'); g.addColorStop(.3,'rgba(0,0,0,0)'); g.addColorStop(.75,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.16)'); ctx.fillStyle=g; ctx.fillRect(-2000,-2000,5000,5000);
+  // waistband
+  const wb=pts[1]; ctx.strokeStyle=fc(P.shirtD,.6); ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(wb.p[0]-nn[0]*wb.w,wb.p[1]-nn[1]*wb.w); ctx.lineTo(wb.p[0]+nn[0]*wb.w,wb.p[1]+nn[1]*wb.w); ctx.stroke();
+  ctx.restore();
+  // neck + collar when his front faces us
+  const front=clamp(s.D[2]*1.4);
+  const nk=proj(s.neck), hd=proj(s.head);
+  if(front>0){ctx.save(); ctx.globalAlpha=front; ctx.fillStyle=fc(P.skinD); limbC(nk,[lerp(nk[0],hd[0],.6),lerp(nk[1],hd[1],.6)],46,46,fc(P.skinD),fc(P.skinD));
+    const a=proj([s.Wd[0]*26,s.Wd[1]*26,s.Wd[2]*26]), b=proj([s.D[0]*14+s.A[0]*-4,s.D[1]*14+s.A[1]*-4,s.D[2]*14]);
+    ctx.strokeStyle=fc(P.shirtD); ctx.lineWidth=5; ctx.beginPath(); for(let k=0;k<=20;k++){const th=k/20*Math.PI; const x=nk[0]+a[0]*Math.cos(th)+b[0]*Math.sin(th), y=nk[1]+a[1]*Math.cos(th)+b[1]*Math.sin(th); k?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke(); ctx.restore();}
+}
+function shoulderPt(s,side,ra){
+  const p=proj(s.L2W3(side*(SHW-14),-L+14,0));
+  if(side>0&&ra>0){const h=CURS.hands.A; const d=[h[0]-p[0],h[1]-p[1]]; const l=Math.hypot(...d)||1; p[0]+=d[0]/l*26*ra; p[1]+=d[1]/l*26*ra;}
+  return p;
+}
+function drawArm(s,side){
+  const sh=shoulderPt(s,side,side>0?s.ra:0); const h=(side>0?CURS.hands.A:CURS.hands.B).slice();
+  const a=UA,b=FA; let dx=h[0]-sh[0],dy=h[1]-sh[1]; let d=Math.hypot(dx,dy);
+  if(d>a+b-2){const k=(a+b-2)/d; h[0]=sh[0]+dx*k; h[1]=sh[1]+dy*k; dx=h[0]-sh[0]; dy=h[1]-sh[1]; d=a+b-2;}
+  d=Math.max(d,20);
+  const ang=Math.atan2(dy,dx), ac=Math.acos(clamp((a*a+d*d-b*b)/(2*a*d),-1,1));
+  // elbows point out from the body and down; the side is chosen smoothly, never snapping
+  const wd=proj(s.Wd), wl=Math.hypot(...wd)||1;
+  const score=sg=>{const ex=Math.cos(ang+sg*ac), ey=Math.sin(ang+sg*ac); return side*(ex*wd[0]+ey*wd[1])/wl + .45*ey;};
+  const sgn=clamp((score(1)-score(-1))/.5,-1,1);
+  const el=[sh[0]+a*Math.cos(ang+sgn*ac), sh[1]+a*Math.sin(ang+sgn*ac)];
+  // forearm (skin), then the sleeve over the upper arm
+  limbC(el,h,25,22,fc(P.skin),fc(P.skinD));
+  const mx=lerp(sh[0],el[0],.8), my=lerp(sh[1],el[1],.8);
+  limbC(sh,[mx,my],36,32,fc(P.shirt),fc(P.shirtD));
+  // hand: a soft mitten with a thumb
+  const o=Math.atan2(h[1]-el[1],h[0]-el[0]);
+  ctx.save(); ctx.translate(h[0],h[1]); ctx.rotate(o);
+  ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(2,1.5,17,14,0,0,7); ctx.fill();
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.ellipse(1,0,16,13,0,0,7); ctx.fill();
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.ellipse(-2,side*-11,8,5.5,-.5*side,0,7); ctx.fill();
+  ctx.restore();
+}
+function drawHead(s,t){
+  const hp=proj(s.head); const hs=RH/150;
+  ctx.save(); ctx.translate(hp[0],hp[1]); ctx.rotate((s.rot+s.tilt)*D2R); ctx.scale(hs,hs);
+  const p=s.pitch, turn=0;
+  const fy=p*72, sq=1-Math.max(p,0)*.35, tx=turn*26;
+  ctx.fillStyle=fc(P.skinD); for(const sd of [-1,1]){ctx.beginPath(); ctx.ellipse(sd*148-tx*.3,12+fy*.4,28,38,0,0,7); ctx.fill();}
+  ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill();
+  const sg=ctx.createRadialGradient(-50-tx,-50,20,0,0,160); sg.addColorStop(0,'rgba(255,255,255,.08)'); sg.addColorStop(1,'rgba(120,60,30,.18)'); ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.arc(0,0,151,0,7); ctx.clip();
+  const hl=-82+Math.max(p,0)*150;
+  ctx.fillStyle=fc(P.hair); ctx.beginPath(); ctx.moveTo(-160,hl+10); ctx.quadraticCurveTo(-90+tx,hl-26,tx*.6,hl-18); ctx.quadraticCurveTo(90+tx,hl-26,160,hl+10); ctx.lineTo(160,-200); ctx.lineTo(-160,-200); ctx.closePath(); ctx.fill();
+  ctx.fillRect(-160,hl,22,90); ctx.fillRect(138,hl,22,90);
+  const feat=1-ss(.5,.8,p);
+  if(feat>0){ ctx.globalAlpha=feat;
+    const ey=-10+fy, ex=58;
+    const lid=clamp(s.lid);
+    for(const sd of [-1,1]){const x=sd*ex+tx;
+      ctx.fillStyle='#fbf7f2'; ctx.beginPath(); ctx.ellipse(x,ey,30,36*sq,0,0,7); ctx.fill();
+      const lx=s.lookX*11, ly=s.lookY*11*sq;
+      ctx.fillStyle='#1c130e'; ctx.beginPath(); ctx.ellipse(x+lx,ey+ly+3,20,23*sq,0,0,7); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(x+lx-7,ey+ly-7,6,0,7); ctx.fill();
+      const sad=s.brow; const top=ey-38*sq, cover=lid*74*sq;
+      ctx.fillStyle=fc(P.skin); ctx.beginPath(); ctx.moveTo(x-36,top-4); ctx.lineTo(x+36,top-4);
+      ctx.lineTo(x+36,top+cover+sd*sad*7); ctx.quadraticCurveTo(x,top+cover+8*(1-lid),x-36,top+cover-sd*sad*7); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle='#2a1a12'; ctx.lineWidth=5; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(x-30,top+cover-sd*sad*6+2); ctx.quadraticCurveTo(x,top+cover+8*(1-lid)+3,x+30,top+cover+sd*sad*6+2); ctx.stroke();
+      const by=ey-62*sq-(1-lid)*4; ctx.strokeStyle=fc(P.hair); ctx.lineWidth=15;
+      ctx.beginPath(); ctx.moveTo(x-sd*30,by+sad*-10); ctx.quadraticCurveTo(x,by-6,x+sd*30,by+sad*8); ctx.stroke();
+    }
+    ctx.fillStyle=fc(P.skinD); ctx.beginPath(); ctx.ellipse(tx*1.1,32+fy,20,14*sq,0,0,7); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  const by0=fy*.9, bfade=1-ss(.7,1,p)*.85;
+  ctx.globalAlpha=bfade; ctx.fillStyle=fc(P.beard); ctx.beginPath(); ctx.moveTo(-152,10+by0*.4); ctx.quadraticCurveTo(-150,150+by0,tx*.5,190+by0); ctx.quadraticCurveTo(150,150+by0,152,10+by0*.4);
+  ctx.lineTo(118,22+by0*.6); ctx.quadraticCurveTo(70+tx,70+by0,tx,72+by0); ctx.quadraticCurveTo(-70+tx,70+by0,-118,22+by0*.6); ctx.closePath(); ctx.fill(); ctx.globalAlpha=1;
+  if(feat>0){ctx.globalAlpha=feat;
+    ctx.fillStyle=fc(P.beard); ctx.beginPath(); ctx.ellipse(tx,66+fy,58,17*sq,0,0,7); ctx.fill();
+    const sm_=s.smile; ctx.strokeStyle='#8a4434'; ctx.lineWidth=7; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(tx-22-sm_*6,96+fy-sm_*3); ctx.quadraticCurveTo(tx,96+fy+sm_*14-(1-sm_)*3*s.brow,tx+22+sm_*6,96+fy-sm_*3); ctx.stroke();
+    ctx.globalAlpha=1;}
+  ctx.restore();
+  ctx.restore();
+}
+
+// ---------------- the blanket ----------------
+// cover: how far along his body (from the neck) the blanket's edge sits; past the feet it is bunched at the foot of the bed
+function coverS(t){return K([[0,30],[T.hit1,30],[T.hit1+.2,16,'o'],[T.hit2,16],[T.hit2+.2,0,'o'],[T.tap3,0],[T.tap3+.6,-4],[T.tap4,-4],[T.tap4+.6,-9],[T.eff1[0],-9],[T.eff1[0]+.42,2,'q'],[T.eff1[1],-8],[T.eff2[0]+.18,-8],
+  [T.eff2[0]+.8,L-10,'i'],[T.eff2[0]+1.35,L+TH+SH+40,'o'],[END,L+TH+SH+40]],t);}
+function bodyPath(s){
+  // from the top of the neck down to the hip, then along the legs (while they lie on the bed)
+  const out=[]; const top=[s.neck[0]+s.A[0]*30,s.neck[1]+s.A[1]*30,s.neck[2]+s.A[2]*30];
+  const n=10; for(let i=0;i<=n;i++){const u=i/n; out.push({p:proj([lerp(top[0],s.H[0],u),lerp(top[1],s.H[1],u),lerp(top[2],s.H[2],u)]),s:-30+u*(L+30),part:'t'});}
+  const lg=legPts(s,1), lg2=legPts(s,-1); const mid=k=>[(lg[k][0]+lg2[k][0])/2,(lg[k][1]+lg2[k][1])/2,(lg[k][2]+lg2[k][2])/2];
+  const kn=proj(mid('kn')), ft=proj(mid('ft')), hp=proj(s.H);
+  for(let i=1;i<=6;i++){const u=i/6; out.push({p:[lerp(hp[0],kn[0],u),lerp(hp[1],kn[1],u)],s:L+u*TH,part:'l'});}
+  for(let i=1;i<=6;i++){const u=i/6; out.push({p:[lerp(kn[0],ft[0],u),lerp(kn[1],ft[1],u)],s:L+TH+u*SH,part:'l'});}
+  return out;
+}
+function blanketShape(s,t){
+  const P_=puff(t), sc=coverS(t), bp=bodyPath(s); const wd=proj(s.Wd), wl=Math.hypot(...wd)||1, nn=[wd[0]/wl,wd[1]/wl];
+  const lyingB=s.lying; const path=new Path2D(); let edgeTop=null, edgeBot=null, xs=[];
+  // torso band
+  const tAll=bp.filter(q=>q.part==='t'); let i0=0; for(let i=0;i<tAll.length;i++) if(tAll[i].s<=sc) i0=i; const tb=sc<tAll[tAll.length-1].s?tAll.slice(i0):[];
+  if(tb.length>1){const tp=[],bt=[];
+    for(const q of tb){const w=lerp(70,82,sm(clamp((L-q.s)/L*1.6)))+4; const up=w+P_+ripple(q.s,t); tp.push([q.p[0]+nn[0]*up,q.p[1]+nn[1]*up]); bt.push([q.p[0]-nn[0]*(w+6),q.p[1]-nn[1]*(w+6)]);}
+    // the cut at the edge: interpolate to the exact cover point
+    const q0=tb[0]; const f=clamp((sc-q0.s)/((tb[1].s-q0.s)||1)); tp[0]=[lerp(tp[0][0],tp[1][0],f),lerp(tp[0][1],tp[1][1],f)]; bt[0]=[lerp(bt[0][0],bt[1][0],f),lerp(bt[0][1],bt[1][1],f)];
+    edgeTop=tp[0]; edgeBot=bt[0];
+    path.moveTo(...tp[0]); for(const p of tp) path.lineTo(...p); for(let i=bt.length-1;i>=0;i--) path.lineTo(...bt[i]); path.closePath();
+    xs.push(...tp.map(p=>p[0]),...bt.map(p=>p[0]));}
+  // legs band (lying along the bed): up to the top of his legs, down to the mattress
+  const lAll=bp.filter(q=>q.part!=='t'||q.s>=L-1); let j0=0; for(let i=0;i<lAll.length;i++) if(lAll[i].s<=sc) j0=i; const lb=sc<lAll[lAll.length-1].s?lAll.slice(j0):[];
+  const legUp=(q)=>(q.part==='t'?70:lerp(66,50,clamp((q.s-L)/(TH+SH))))+P_*.85+ripple(q.s,t);
+  if(lb.length>1){const tp=[]; for(const q of lb){tp.push([q.p[0],q.p[1]-legUp(q)]);}
+    const q0=lb[0]; const f=clamp((sc-q0.s)/((lb[1].s-q0.s)||1)); tp[0]=[lerp(tp[0][0],tp[1][0],f),lerp(tp[0][1],tp[1][1],f)];
+    const last=lb[lb.length-1];
+    if(!edgeTop){edgeTop=tp[0]; edgeBot=[tp[0][0],MAT+.35*40];}
+    path.moveTo(tp[0][0],MAT+30); path.lineTo(...tp[0]); for(const p of tp) path.lineTo(...p);
+    path.quadraticCurveTo(last.p[0]+40,last.p[1]-legUp(last)*.6,last.p[0]+44,MAT+10); path.lineTo(tp[0][0],MAT+30); path.closePath();
+    xs.push(tp[0][0],last.p[0]+44);}
+  // bunched at the foot of the bed once it has slid off him
+  const bunch=ss(L+TH,L+TH+SH+40,sc);
+  if(bunch>0){const cx=930, cy=MAT-8, R=rng(9); for(let k=0;k<6;k++){const ox=(R()-.5)*120*bunch, oy=(R()-.6)*40*bunch, rw=(40+R()*36)*bunch, rh=(26+R()*22)*bunch; path.moveTo(cx+ox+rw,cy+oy); path.ellipse(cx+ox,cy+oy,rw,rh,0,0,Math.PI*2);} xs.push(cx-90*bunch,cx+100);}
+  // the part hanging over the front of the mattress, toward us
+  const yt=MAT-10, yh=MAT+.35*120+56; let xl=Math.min(...xs), xr=Math.max(...xs,1000);
+  if(xs.length){ xl=Math.max(xl,384); xr=Math.min(xr+20,1064);
+    path.moveTo(xl,yt); path.lineTo(xr,yt); path.lineTo(xr+4,yh-4);
+    const nw=Math.max(2,Math.round((xr-xl)/70)); for(let k=nw;k>=0;k--){const x=lerp(xl,xr,k/nw); path.lineTo(x,yh+(k%2?6:-2)*(1-.4*bunch));}
+    path.closePath();}
+  return {path,edgeTop,edgeBot,xl,xr,nn,P_};
+}
+function blanketEdge(s){const b=blanketShape(s,s.t); return b.edgeTop?[b.edgeTop[0]+(b.edgeBot?(b.edgeBot[0]-b.edgeTop[0])*.18:0),b.edgeTop[1]+(b.edgeBot?(b.edgeBot[1]-b.edgeTop[1])*.18:0)]:[900,940];}
+function drawBlanket(s,t,W){
+  const b=blanketShape(s,t); const hv=clamp(heavy(t)*s.lying,0,1.3);
+  const col=mixc(mixc([64,118,128],[36,70,82],clamp(hv/1.15)),[92,138,140],W), dk=mixc(col,[0,0,0],.28), hi=mixc(col,[255,255,255],.14);
+  ctx.save(); ctx.fillStyle=rgb(col); ctx.fill(b.path,'nonzero'); ctx.clip(b.path,'nonzero');
+  // soft quilt folds, deeper as it gets heavier
+  ctx.strokeStyle=rgb(dk,.35+.3*clamp(hv)); ctx.lineWidth=4; ctx.lineCap='round';
+  const R=rng(31); for(let k=0;k<7;k++){const x=b.xl+40+R()*(b.xr-b.xl-80), y=MAT-60+R()*120; ctx.beginPath(); ctx.moveTo(x-40,y); ctx.quadraticCurveTo(x,y+8+8*hv,x+46,y-4); ctx.stroke();}
+  // vertical drape folds
+  for(let x=b.xl+30;x<b.xr-10;x+=70){ctx.beginPath(); ctx.moveTo(x,MAT+22); ctx.quadraticCurveTo(x+6,MAT+60,x-2,MAT+100); ctx.stroke();}
+  // a quilt stitch line along the top
+  ctx.strokeStyle=rgb(hi,.25); ctx.lineWidth=3; ctx.setLineDash([10,10]); ctx.beginPath(); ctx.moveTo(b.xl,MAT+18); ctx.lineTo(b.xr,MAT+18); ctx.stroke(); ctx.setLineDash([]);
+  // shading toward the bottom
+  const g=ctx.createLinearGradient(0,MAT-140,0,MAT+110); g.addColorStop(0,rgb(hi,.18)); g.addColorStop(.5,'rgba(0,0,0,0)'); g.addColorStop(1,rgb([0,0,0],.18)); ctx.fillStyle=g; ctx.fillRect(-500,MAT-400,2500,700);
+  ctx.restore();
+  // the turned-down edge near his face
+  const ef=1-ss(L-60,L-10,coverS(t)); if(b.edgeTop&&b.edgeBot&&ef>0){ctx.strokeStyle=rgb(mixc([200,206,222],[250,240,226],W),ef); ctx.lineWidth=12; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(...b.edgeTop); ctx.lineTo(...b.edgeBot); ctx.stroke();}
+}
+
+// ---------------- light passes ----------------
+function grade(t,c,s){
+  const W=warm(t); ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalCompositeOperation='multiply'; ctx.fillStyle=rgb(mixc([158,168,206],[255,246,232],W)); ctx.fillRect(0,0,W_,H_);
+  ctx.globalCompositeOperation='screen';
+  // the alarm's cold light
+  const G=screenLit(t)*(.75+.25*buzz(t)); if(G>.01){const [fx,fy]=toScr(c,PHONE[0],PHONE[1]); const r=560*c.Z; const g=ctx.createRadialGradient(fx,fy,0,fx,fy,r); g.addColorStop(0,`rgba(120,160,240,${.42*G})`); g.addColorStop(.35,`rgba(90,130,220,${.16*G})`); g.addColorStop(1,'rgba(90,130,220,0)'); ctx.fillStyle=g; ctx.fillRect(0,0,W_,H_);}
+  // the answer: the same phone glows gold and its light spreads through the room
+  const gp=goldPhone(t), sp=spread(t);
+  if(gp>0){const [fx,fy]=toScr(c,PHONE[0],PHONE[1]); const r=(140+sp*1500)*c.Z; const g=ctx.createRadialGradient(fx,fy,0,fx,fy,r); g.addColorStop(0,`rgba(255,226,160,${.8*gp})`); g.addColorStop(.12,`rgba(255,196,120,${.34*gp})`); g.addColorStop(.7,`rgba(255,180,110,${.07*gp})`); g.addColorStop(1,'rgba(255,170,100,0)'); ctx.fillStyle=g; ctx.fillRect(0,0,W_,H_);}
+  // light reaches him
+  const onHim=ss(T.ANS+1.2,T.ANS+3.2,t)*(1-ss(T.night[0],T.night[1],t)); if(onHim>0){const hp=proj(s.head); const [fx,fy]=toScr(c,hp[0],hp[1]+40); const r=420*c.Z; const g=ctx.createRadialGradient(fx,fy,0,fx,fy,r); g.addColorStop(0,`rgba(255,214,150,${.28*onHim})`); g.addColorStop(1,'rgba(255,200,140,0)'); ctx.fillStyle=g; ctx.fillRect(0,0,W_,H_);}
+  ctx.globalCompositeOperation='source-over';
+  const v=ctx.createRadialGradient(540,900,500,540,960,1350); v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,`rgba(0,0,0,${lerp(.5,.32,W)})`); ctx.fillStyle=v; ctx.fillRect(0,0,W_,H_);
+}
+function drawBeams(t,c){
+  const D=dawnWin(t)*(1-ss(T.night[0],T.night[1],t)*0); if(D<=0) return; setCam(c); ctx.save(); ctx.globalCompositeOperation='screen';
+  const [wx,wy,ww,wh]=WIN;
+  for(let i=0;i<4;i++){const x0=wx+30+i*62, w=34+i*10, sh=Math.sin(t*.35+i*1.7)*.25+.75;
+    const g=ctx.createLinearGradient(x0,wy,x0+700,wy+900); g.addColorStop(0,`rgba(255,214,150,${.16*D*sh})`); g.addColorStop(1,'rgba(255,214,150,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(x0,wy+20); ctx.lineTo(x0+w,wy+20); ctx.lineTo(x0+w+760,wy+980); ctx.lineTo(x0+620,wy+980); ctx.closePath(); ctx.fill();}
+  const R=rng(9); for(let i=0;i<40;i++){const bx=wx+R()*800, by=wy+100+R()*700, sp=.2+R()*.5; const x=bx+Math.sin(t*sp+i)*26, y=by+Math.cos(t*sp*.8+i)*20-((t*6*sp)%50);
+    ctx.fillStyle=`rgba(255,236,200,${.5*D*(.4+.6*R())})`; ctx.beginPath(); ctx.arc(x,y,1.4+R()*2,0,7); ctx.fill();}
+  ctx.restore();
+}
+
+// ---------------- text ----------------
+const A1=['فَاذْكُرُونِي','أَذْكُرْكُمْ'], E1='So remember Me; I will remember you.';
+function drawText(t){
+  ctx.setTransform(1,0,0,1,0,0); const W=warm(t); const TXC=505;
+  if(W>0){const sc=ctx.createRadialGradient(TXC,420,40,TXC,420,620); sc.addColorStop(0,`rgba(70,36,12,${.42*W})`); sc.addColorStop(1,'rgba(70,36,12,0)'); ctx.save(); ctx.translate(TXC,420); ctx.scale(1,.42); ctx.translate(-TXC,-420); ctx.fillStyle=sc; ctx.fillRect(TXC-640,-300,1280,1440); ctx.restore();}
+  ctx.save(); ctx.textBaseline='middle'; ctx.direction='rtl'; ctx.textAlign='center';
+  ctx.font='112px AmiriQ'; const w0=ctx.measureText(A1[0]).width, w1=ctx.measureText(A1[1]).width, gap=34, tot=w0+w1+gap;
+  const y1=355; const glowQ=ss(T.ANS+1.4,T.ANS+3.4,t)*(1-ss(T.night[0],T.night[0]+1.2,t));
+  ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=22; ctx.fillStyle='#fff7ea';
+  ctx.fillText(A1[0],TXC+tot/2-w0/2,y1);
+  ctx.fillStyle=rgb(mixc([255,247,234],[255,214,140],glowQ)); if(glowQ>0){ctx.shadowColor=`rgba(255,190,100,${.9*glowQ})`; ctx.shadowBlur=22+30*glowQ;}
+  ctx.fillText(A1[1],TXC-tot/2+w1/2,y1);
+  ctx.restore();
+  ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowBlur=16;
+  ctx.font='italic 60px CormI'; ctx.fillStyle='#f8efe0'; ctx.fillText(E1,TXC,468); ctx.restore();
+  const out=1-ss(T.glide[0]+1.2,T.glide[0]+2.2,t);
+  const rf=ss(T.ANS+6,T.ANS+7,t)*out; if(rf>0){ctx.save(); ctx.textAlign='center'; ctx.font='30px Corm'; ctx.letterSpacing='7px'; ctx.fillStyle=`rgba(255,240,215,${.8*rf})`; ctx.shadowColor='rgba(60,30,0,.6)'; ctx.shadowBlur=10; ctx.fillText('AL-BAQARAH 2:152',TXC,548); ctx.restore();}
+  const wm=ss(T.ANS+7.5,T.ANS+8.5,t)*out; if(wm>0){ctx.save(); ctx.textAlign='center'; ctx.font='28px Corm'; ctx.letterSpacing='10px'; ctx.fillStyle=`rgba(255,240,215,${.55*wm})`; ctx.shadowColor='rgba(60,30,0,.5)'; ctx.shadowBlur=8; ctx.fillText('AYAH STUDIO',TXC,1300); ctx.restore();}
+  if(window.SAFE){ctx.strokeStyle='rgba(255,0,0,.8)'; ctx.lineWidth=3; ctx.strokeRect(0,270,940,980);}
+}
+
+// ---------------- frame ----------------
+function bodyTime(t){return t>=T.reset? t-END : t;}
+function draw(tr){
+  const t=((tr%END)+END)%END;
+  ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over'; ctx.filter='none'; ctx.shadowColor='transparent';
+  const tb=bodyTime(t);
+  const c=cam(t), W=warm(t), s=pose(tb); CURS=s; s.hands=null; s.hands=handsAt(s,tb); CURS=s;
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W_,H_);
+  drawRoom(t,W,c);
+  setCam(c); drawBed(tb,W,s); drawRug(t,W);
+  drawLegs(s); drawTorso(s); drawArm(s,-1); drawHead(s,tb);
+  drawBlanket(s,tb,W);
+  drawArm(s,1);
+  drawBeams(t,c);
+  grade(t,c,s);
+  drawText(t);
+}
+function events(){
+  const ev=[];
+  for(const[a,b,lab]of RINGS){ev.push({type:'ring',a,b});}
+  for(const[tt,k]of TAPS){ev.push({type:'tap',t:tt,k});}
+  const cur={type:'curves',dt:.05,W:[],D:[],G:[],BZ:[],HV:[],LY:[]};
+  for(let t=0;t<=END+1e-6;t+=.05){cur.W.push(+warm(t).toFixed(4)); cur.D.push(+dawnWin(t).toFixed(4)); cur.G.push(+goldPhone(t).toFixed(4));}
+  for(let t=0;t<=END+1e-6;t+=.01){cur.BZ.push(+buzz(t).toFixed(3));}
+  ev.push(cur); ev.push({type:'T',T}); return ev;
+}
+// joint trace for the glitch scan: every joint on screen at time t
+function trace(t){
+  const tb=bodyTime(t); const c=cam(t); const s=pose(tb); CURS=s; s.hands=handsAt(s,tb); CURS=s;
+  const out={}; const sc=p=>toScr(c,p[0],p[1]);
+  out.hip=sc(proj(s.H)); out.neck=sc(proj(s.neck)); out.head=sc(proj(s.head));
+  for(const sd of [-1,1]){const g=legPts(s,sd); out['knee'+sd]=sc(proj(g.kn)); out['foot'+sd]=sc(proj(g.ft)); out['sh'+sd]=sc(shoulderPt(s,sd,sd>0?s.ra:0));}
+  out.handA=sc(s.hands.A); out.handB=sc(s.hands.B);
+  const b=blanketShape(s,tb); if(b.edgeTop) out.edge=sc(b.edgeTop);
+  out.cam=[c.CX*c.Z,c.CY*c.Z]; out.Z=c.Z; out.rot=s.rot; return out;
+}
+window.draw=draw; window.events=events; window.trace=trace; window.REAL_END=()=>END;
+window.ready=(async()=>{await document.fonts.load('112px AmiriQ'); await document.fonts.load('italic 60px CormI'); await document.fonts.load('30px Corm'); await document.fonts.load('500 46px InterU'); await document.fonts.load('300 33px InterU'); return true;})();
+</script></body></html>
