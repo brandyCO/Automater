@@ -2,7 +2,7 @@
 # A job folder render-jobs/<job>/ holds the render kit (run.sh, render.js, html/js, fonts),
 # sound.wav (the final, loudness-normalised soundtrack) and job.env (NAME=..., FRAMES=..., optional SLICES=...).
 # Pushing a changed job.env starts this workflow; it can also be started by hand (Actions tab -> Render reel -> Run).
-# Output: a public release "render-<job>-<run>" with <NAME>.mp4 (60 fps master), <NAME>_pc.mp4 and <NAME>_phone.mp4.
+# Output: a public release "render-<job>-<run>" with <NAME>.mp4 (60 fps master), <NAME>_pc.mp4 and <NAME>_phone.mp4, all 60 fps.
 name: Render reel
 
 on:
@@ -113,8 +113,8 @@ jobs:
               -map "[v]" -map $i:a -c:v libx264 -preset medium -b:v 12M -maxrate 14M -bufsize 24M -r 60 \
               -c:a aac -b:a 192k -movflags +faststart -shortest "$NAME.mp4"
             ffmpeg -hide_banner -loglevel error -y -i "$NAME.mp4" -c:v libx264 -preset slow -b:v 2.0M -maxrate 2.8M -bufsize 5M -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart "${NAME}_pc.mp4" &
-            ffmpeg -hide_banner -loglevel error -y -i "$NAME.mp4" -vf fps=30 -c:v libx264 -preset slow -tune grain -b:v 1.65M -pass 1 -passlogfile ph -an -f mp4 /dev/null && \
-            ffmpeg -hide_banner -loglevel error -y -i "$NAME.mp4" -vf fps=30 -c:v libx264 -preset slow -tune grain -b:v 1.65M -pass 2 -passlogfile ph -pix_fmt yuv420p -c:a aac -b:a 112k -movflags +faststart "${NAME}_phone.mp4"
+            ffmpeg -hide_banner -loglevel error -y -i "$NAME.mp4" -r 60 -c:v libx264 -preset slow -tune grain -b:v 3.2M -pass 1 -passlogfile ph -an -f mp4 /dev/null && \
+            ffmpeg -hide_banner -loglevel error -y -i "$NAME.mp4" -r 60 -c:v libx264 -preset slow -tune grain -b:v 3.2M -pass 2 -passlogfile ph -pix_fmt yuv420p -c:a aac -b:a 112k -movflags +faststart "${NAME}_phone.mp4"
             wait
           fi
           ls -la
